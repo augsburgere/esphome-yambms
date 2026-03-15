@@ -1,0 +1,176 @@
+# =============================================================================
+# YamBMS — Ruixu BMS RS485 example  (single-node, local-packages)
+#
+# This is the top-level ESPHome YAML you flash onto your ESP32.
+# It assumes:
+#   • Board       : waveshare ESP32-S3_WS-RS485-CAN.yaml
+#   • Inverter    : CAN bus (PYLON protocol), e.g. Deye / Sol-Ark / EG4
+#   • BMS         : 1–3× Ruixu 16S packs, each on the same RS485 bus
+#   • RS485 wiring: A+/B− from all packs daisy-chained to a single RS485→TTL
+#                   adapter connected to uart_esp_1 (RX=GPIO17, TX=GPIO18)
+#
+# Folder layout expected:
+#   your_device.yaml          ← this file
+#   packages/
+#     bms/
+#       bms_RUIXU_RS485.yaml  ← the Ruixu BMS package
+#     board/
+#       board_ESP32_Generic.yaml   (from the YamBMS repo)
+#     base/
+#       device_base.yaml           (from the YamBMS repo)
+#     yambms/
+#       yambms.yaml                (from the YamBMS repo)
+#       yambms_combine.yaml        (from the YamBMS repo)
+#     can/
+#       canbus_ESP32_CAN.yaml      (from the YamBMS repo)
+# =============================================================================
+
+substitutions:
+  # ── Device identity ───────────────────────────────────────────────────────
+  friendly_name:  'YamBMS'
+  hostname:       'yambms'
+  name:           ''
+
+  # ── Battery chemistry / pack sizing ───────────────────────────────────────
+  yambms_cell_count:                     '16'    # cells in series per pack
+  yambms_battery_chemistry:             'LFP'   # LFP / Li-ion / LTO
+  yambms_min_cell_voltage:              '2.80'  # V — absolute UVP cutoff
+  yambms_max_cell_voltage:              '3.65'  # V — absolute OVP cutoff
+  yambms_bulk_voltage:                  '55.20' # V  (3.45V × 16)
+  yambms_float_voltage:                 '53.60' # V  (3.35V × 16)
+  yambms_rebulk_voltage:                '52.00' # V
+  yambms_max_requested_charge_current:  '100'   # A  (set to your pack C-rate)
+  yambms_max_requested_discharge_current: '200' # A
+
+  # ── Update interval ───────────────────────────────────────────────────────
+  bms_update_interval:  '5s'
+
+esphome:
+  name: ${hostname}
+  friendly_name: ${friendly_name}
+  comment: "YamBMS — Ruixu RS485"
+  min_version: "2024.6.0"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+
+# ---------------------------------------------------------------------------
+# YamBMS remote packages — board, base, combine logic, CAN output
+# ---------------------------------------------------------------------------
+remote_packages:
+  url: https://github.com/augsburgere/esphome-yambms
+  ref: main
+  refresh: 0s
+  files:
+    # Board definition (GPIO map, UART IDs, etc.)
+    - path: 'packages/board/board_ESP32-S3_WS-RS485-CAN.yaml'
+
+    # UART 1 — wired to your RS485 module (change pins to match your board)
+    - path: 'packages/board/board_options_itf_uart_esp_1.yaml'
+      vars:
+        uart_esp_1_rx_pin: 'GPIO17'
+        uart_esp_1_tx_pin: 'GPIO18'
+        uart_esp_1_baud_rate: '9600'       # ← Ruixu default; change to 19200
+        uart_esp_1_rx_buffer_size: '384'   # must hold the full BMS response
+        uart_esp_1_flow_control_pin: 'GPIO21'  # uncomment if needed
+
+    # CAN bus — adjust to your transceiver wiring
+    - path: 'packages/board/board_options_itf_canbus_esp32_can.yaml'
+      vars:
+        canbus_node_id:  'canbus_inverter_1'
+        canbus_tx_pin:   'GPIO01'
+        canbus_rx_pin:   'GPIO02'
+
+    # YamBMS core logic
+    - path: 'packages/base/device_base.yaml'
+    - path: 'packages/yambms/yambms.yaml'
+      vars:
+        yambms_cell_count:                      ${yambms_cell_count}
+        yambms_battery_chemistry:               ${yambms_battery_chemistry}
+        yambms_min_cell_voltage:                ${yambms_min_cell_voltage}
+        yambms_max_cell_voltage:                ${yambms_max_cell_voltage}
+        yambms_bulk_voltage:                    ${yambms_bulk_voltage}
+        yambms_float_voltage:                   ${yambms_float_voltage}
+        yambms_rebulk_voltage:                  ${yambms_rebulk_voltage}
+        yambms_max_requested_charge_current:    ${yambms_max_requested_charge_current}
+        yambms_max_requested_discharge_current: ${yambms_max_requested_discharge_current}
+
+    # CAN output protocol (PYLON = default; also supports SMA / Victron / LuxPower)
+    - path: 'packages/can/canbus_PYLON_500k.yaml'
+      vars:
+        canbus_node_id: 'canbus_inverter_1'
+
+
+# ---------------------------------------------------------------------------
+# Local BMS packages — one entry per physical Ruixu pack
+# ---------------------------------------------------------------------------
+packages:
+
+  # ── Pack 1  (DIP address 0x00) ────────────────────────────────────────────
+  bms1:
+    file: packages/bms/bms_RUIXU_RS485.yaml
+    vars:
+      bms_id:              '1'
+      bms_name:            'Ruixu BMS 1'
+      bms_uart_id:         'uart_esp_1'
+      bms_address:         '0x00'
+      bms_update_interval: ${bms_update_interval}
+      bms_cell_count:      ${yambms_cell_count}
+
+  # ── Pack 2  (DIP address 0x01) — uncomment to add a second pack ──────────
+  bms2:
+    file: packages/bms/bms_RUIXU_RS485.yaml
+    vars:
+      bms_id:              '2'
+      bms_name:            'Ruixu BMS 2'
+      bms_uart_id:         'uart_esp_1'   # same bus, different address
+      bms_address:         '0x01'
+      bms_update_interval: ${bms_update_interval}
+      bms_cell_count:      ${yambms_cell_count}
+
+  # ── Pack 3  (DIP address 0x02) — uncomment to add a third pack ───────────
+  # bms3:
+  #   file: packages/bms/bms_RUIXU_RS485.yaml
+  #   vars:
+  #     bms_id:              '3'
+  #     bms_name:            'Ruixu BMS 3'
+  #     bms_uart_id:         'uart_esp_1'
+  #     bms_address:         '0x02'
+  #     bms_update_interval: ${bms_update_interval}
+  #     bms_cell_count:      ${yambms_cell_count}
+
+  # ── YamBMS combine block — tells YamBMS how many BMS to merge ────────────
+  # This remote package must come AFTER all bms_id entries above.
+  yambms_combine:
+    url: https://github.com/augsburgere/esphome-yambms
+    ref: main
+    refresh: 0s
+    file: 'packages/yambms/yambms_combine.yaml'
+    vars:
+      # Must match the highest bms_id number used above
+      yambms_bms_count: '2'    # change to '2' or '3' if you uncomment packs above
+
+
+# ---------------------------------------------------------------------------
+# WiFi — fill in via secrets
+# ---------------------------------------------------------------------------
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "${hostname} Fallback"
+    password: !secret wifi_ap_password
+
+logger:
+  baud_rate: 0          # frees UART0; required when using all 3 UARTs
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
