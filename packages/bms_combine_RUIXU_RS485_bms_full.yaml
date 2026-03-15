@@ -1,0 +1,361 @@
+# =============================================================================
+# YamBMS — Ruixu BMS RS485  |  Per-pack BMS definition (full sensors)
+# File: packages/bms/bms_combine_RUIXU_RS485_bms_full.yaml
+#
+# Mirrors the structure of bms_combine_SEPLOS_V1_V2_RS485_bms_full.yaml
+# from YamBMS v1.6.0, adapted for the Ruixu BMS protocol differences:
+#
+#   1. Current sign is INVERTED on Ruixu vs Seplos.
+#      The raw component returns negative = discharging.
+#      YamBMS expects positive = discharging, negative = charging.
+#      A template sensor corrects this with * -1.
+#
+#   2. The external_components source points to easybotics/esphome-ruixu-bms
+#      (a fork of syssi/esphome-seplos-bms with Ruixu protocol fixes).
+#      The modbus bus must be declared separately in:
+#        bms_combine_RUIXU_RS485_modbus.yaml
+#
+# Import once per physical pack. Vars that must be supplied by the caller:
+#
+#   seplos_modbus_id          — ID of the modbus bus (from the modbus yaml)
+#   bms_id                    — integer, must be numbered 1,2,3… in order
+#   bms_name                  — display name e.g. 'Ruixu BMS 1'
+#   bms_address               — DIP-switch address: 0x00, 0x01, 0x02 …
+#   bms_protocol_version      — always '0x21' for Ruixu
+#   bms_max_charge_current    — A, used by YamBMS Auto CCL
+#   bms_max_discharge_current — A, used by YamBMS Auto DCL
+#   bms_cell_ovp              — V, OVP threshold e.g. '3.650'
+#   bms_cell_uvp              — V, UVP threshold e.g. '2.800'
+#   bms_balance_trigger_voltage — V, delta that triggers balancing e.g. '0.010'
+# =============================================================================
+
+substitutions:
+  seplos_modbus_id:           'ruixu_modbus'
+  bms_id:                     '1'
+  bms_name:                   'Ruixu BMS 1'
+  bms_address:                '0x00'
+  bms_protocol_version:       '0x21'
+  bms_max_charge_current:     '100'
+  bms_max_discharge_current:  '100'
+  bms_cell_ovp:               '3.650'
+  bms_cell_uvp:               '2.800'
+  bms_balance_trigger_voltage: '0.010'
+
+# ---------------------------------------------------------------------------
+# BMS device instance — one per physical pack
+# ---------------------------------------------------------------------------
+seplos_bms:
+  - id: ruixu_bms_${bms_id}
+    address: ${bms_address}
+    protocol_version: ${bms_protocol_version}
+    seplos_modbus_id: ${seplos_modbus_id}
+    update_interval: ${bms_update_interval}
+
+
+# ---------------------------------------------------------------------------
+# Globals — YamBMS bms_combine reads these to implement Auto CCL/DCL/CVL.
+# These are static configuration values (set once at boot from substitutions).
+# ---------------------------------------------------------------------------
+globals:
+  - id: bms${bms_id}_max_charge_current
+    type: float
+    restore_value: no
+    initial_value: '${bms_max_charge_current}'
+
+  - id: bms${bms_id}_max_discharge_current
+    type: float
+    restore_value: no
+    initial_value: '${bms_max_discharge_current}'
+
+  - id: bms${bms_id}_cell_ovp
+    type: float
+    restore_value: no
+    initial_value: '${bms_cell_ovp}'
+
+  - id: bms${bms_id}_cell_uvp
+    type: float
+    restore_value: no
+    initial_value: '${bms_cell_uvp}'
+
+  - id: bms${bms_id}_balance_trigger_voltage
+    type: float
+    restore_value: no
+    initial_value: '${bms_balance_trigger_voltage}'
+
+
+# ---------------------------------------------------------------------------
+# Sensors
+# ---------------------------------------------------------------------------
+sensor:
+
+  # ── Pack / total voltage ──────────────────────────────────────────────────
+  - platform: seplos_bms
+    seplos_bms_id: ruixu_bms_${bms_id}
+    total_battery_voltage:
+      id: bms${bms_id}_total_voltage
+      name: "${bms_name} Total Voltage"
+      unit_of_measurement: V
+      accuracy_decimals: 3
+      device_class: voltage
+      state_class: measurement
+
+  # ── Current (raw — hidden; Ruixu inverts the sign vs YamBMS convention) ──
+  - platform: seplos_bms
+    seplos_bms_id: ruixu_bms_${bms_id}
+    current:
+      id: bms${bms_id}_current_raw
+      internal: true
+
+  # ── Current (corrected: positive = discharging, negative = charging) ─────
+  - platform: template
+    id: bms${bms_id}_current
+    name: "${bms_name} Current"
+    unit_of_measurement: A
+    accuracy_decimals: 2
+    device_class: current
+    state_class: measurement
+    update_interval: ${bms_update_interval}
+    lambda: |-
+      // Ruixu reports current with opposite polarity to the YamBMS convention.
+      // Multiply by -1 so that: positive = discharging, negative = charging.
+      if (!isnan(id(bms${bms_id}_current_raw).state))
+        return id(bms${bms_id}_current_raw).state * -1.0f;
+      return NAN;
+
+  # ── Power (derived) ───────────────────────────────────────────────────────
+  - platform: template
+    id: bms${bms_id}_power
+    name: "${bms_name} Power"
+    unit_of_measurement: W
+    accuracy_decimals: 1
+    device_class: power
+    state_class: measurement
+    update_interval: ${bms_update_interval}
+    lambda: |-
+      if (!isnan(id(bms${bms_id}_total_voltage).state) &&
+          !isnan(id(bms${bms_id}_current).state))
+        return id(bms${bms_id}_total_voltage).state *
+               id(bms${bms_id}_current).state;
+      return NAN;
+
+  # ── State of Charge ───────────────────────────────────────────────────────
+  - platform: seplos_bms
+    seplos_bms_id: ruixu_bms_${bms_id}
+    state_of_charge:
+      id: bms${bms_id}_soc
+      name: "${bms_name} State of Charge"
+      unit_of_measurement: "%"
+      accuracy_decimals: 1
+      device_class: battery
+      state_class: measurement
+
+  # ── Remaining capacity ────────────────────────────────────────────────────
+  - platform: seplos_bms
+    seplos_bms_id: ruixu_bms_${bms_id}
+    residual_capacity:
+      id: bms${bms_id}_capacity_remaining
+      name: "${bms_name} Capacity Remaining"
+      unit_of_measurement: Ah
+      accuracy_decimals: 2
+      state_class: measurement
+
+  # ── Rated / total capacity ────────────────────────────────────────────────
+  - platform: seplos_bms
+    seplos_bms_id: ruixu_bms_${bms_id}
+    rated_capacity:
+      id: bms${bms_id}_capacity_total
+      name: "${bms_name} Capacity Total"
+      unit_of_measurement: Ah
+      accuracy_decimals: 2
+      state_class: measurement
+
+  # ── Cell voltages (16S — remove cells 9-16 if you have an 8S pack) ───────
+  - platform: seplos_bms
+    seplos_bms_id: ruixu_bms_${bms_id}
+    cell_voltage_1:  { id: bms${bms_id}_cell_voltage_01, name: "${bms_name} Cell Voltage 01",  unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_2:  { id: bms${bms_id}_cell_voltage_02, name: "${bms_name} Cell Voltage 02",  unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_3:  { id: bms${bms_id}_cell_voltage_03, name: "${bms_name} Cell Voltage 03",  unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_4:  { id: bms${bms_id}_cell_voltage_04, name: "${bms_name} Cell Voltage 04",  unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_5:  { id: bms${bms_id}_cell_voltage_05, name: "${bms_name} Cell Voltage 05",  unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_6:  { id: bms${bms_id}_cell_voltage_06, name: "${bms_name} Cell Voltage 06",  unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_7:  { id: bms${bms_id}_cell_voltage_07, name: "${bms_name} Cell Voltage 07",  unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_8:  { id: bms${bms_id}_cell_voltage_08, name: "${bms_name} Cell Voltage 08",  unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_9:  { id: bms${bms_id}_cell_voltage_09, name: "${bms_name} Cell Voltage 09",  unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_10: { id: bms${bms_id}_cell_voltage_10, name: "${bms_name} Cell Voltage 10", unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_11: { id: bms${bms_id}_cell_voltage_11, name: "${bms_name} Cell Voltage 11", unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_12: { id: bms${bms_id}_cell_voltage_12, name: "${bms_name} Cell Voltage 12", unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_13: { id: bms${bms_id}_cell_voltage_13, name: "${bms_name} Cell Voltage 13", unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_14: { id: bms${bms_id}_cell_voltage_14, name: "${bms_name} Cell Voltage 14", unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_15: { id: bms${bms_id}_cell_voltage_15, name: "${bms_name} Cell Voltage 15", unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+    cell_voltage_16: { id: bms${bms_id}_cell_voltage_16, name: "${bms_name} Cell Voltage 16", unit_of_measurement: V, accuracy_decimals: 3, device_class: voltage, state_class: measurement }
+
+  # ── Min cell voltage — YamBMS charging logic is driven by this ────────────
+  - platform: template
+    id: bms${bms_id}_min_cell_voltage
+    name: "${bms_name} Min Cell Voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: ${bms_update_interval}
+    lambda: |-
+      float v, min_v = 9.0f;
+      v = id(bms${bms_id}_cell_voltage_01).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_02).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_03).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_04).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_05).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_06).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_07).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_08).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_09).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_10).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_11).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_12).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_13).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_14).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_15).state; if (!isnan(v) && v < min_v) min_v = v;
+      v = id(bms${bms_id}_cell_voltage_16).state; if (!isnan(v) && v < min_v) min_v = v;
+      return (min_v < 9.0f) ? min_v : NAN;
+
+  # ── Max cell voltage — YamBMS charging logic is driven by this ────────────
+  - platform: template
+    id: bms${bms_id}_max_cell_voltage
+    name: "${bms_name} Max Cell Voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: ${bms_update_interval}
+    lambda: |-
+      float v, max_v = 0.0f;
+      v = id(bms${bms_id}_cell_voltage_01).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_02).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_03).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_04).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_05).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_06).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_07).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_08).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_09).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_10).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_11).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_12).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_13).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_14).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_15).state; if (!isnan(v) && v > max_v) max_v = v;
+      v = id(bms${bms_id}_cell_voltage_16).state; if (!isnan(v) && v > max_v) max_v = v;
+      return (max_v > 0.0f) ? max_v : NAN;
+
+  # ── Delta cell voltage ────────────────────────────────────────────────────
+  - platform: template
+    id: bms${bms_id}_delta_cell_voltage
+    name: "${bms_name} Delta Cell Voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    device_class: voltage
+    state_class: measurement
+    update_interval: ${bms_update_interval}
+    lambda: |-
+      float mn = id(bms${bms_id}_min_cell_voltage).state;
+      float mx = id(bms${bms_id}_max_cell_voltage).state;
+      if (!isnan(mn) && !isnan(mx)) return mx - mn;
+      return NAN;
+
+  # ── Temperatures ──────────────────────────────────────────────────────────
+  # Ruixu uses the same 5-sensor layout as Seplos: T1-T4 cell, T5 ambient.
+  - platform: seplos_bms
+    seplos_bms_id: ruixu_bms_${bms_id}
+    temperature_1: { id: bms${bms_id}_temperature_1, name: "${bms_name} Temperature 1",       unit_of_measurement: "°C", accuracy_decimals: 1, device_class: temperature, state_class: measurement }
+    temperature_2: { id: bms${bms_id}_temperature_2, name: "${bms_name} Temperature 2",       unit_of_measurement: "°C", accuracy_decimals: 1, device_class: temperature, state_class: measurement }
+    temperature_3: { id: bms${bms_id}_temperature_3, name: "${bms_name} Temperature 3",       unit_of_measurement: "°C", accuracy_decimals: 1, device_class: temperature, state_class: measurement }
+    temperature_4: { id: bms${bms_id}_temperature_4, name: "${bms_name} Temperature 4",       unit_of_measurement: "°C", accuracy_decimals: 1, device_class: temperature, state_class: measurement }
+    temperature_5: { id: bms${bms_id}_temperature_5, name: "${bms_name} Temperature Ambient", unit_of_measurement: "°C", accuracy_decimals: 1, device_class: temperature, state_class: measurement }
+
+  # ── Max temperature — read by YamBMS bms_combine ─────────────────────────
+  - platform: template
+    id: bms${bms_id}_max_temperature
+    name: "${bms_name} Max Temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    update_interval: ${bms_update_interval}
+    lambda: |-
+      float t, max_t = -100.0f;
+      t = id(bms${bms_id}_temperature_1).state; if (!isnan(t) && t > max_t) max_t = t;
+      t = id(bms${bms_id}_temperature_2).state; if (!isnan(t) && t > max_t) max_t = t;
+      t = id(bms${bms_id}_temperature_3).state; if (!isnan(t) && t > max_t) max_t = t;
+      t = id(bms${bms_id}_temperature_4).state; if (!isnan(t) && t > max_t) max_t = t;
+      return (max_t > -100.0f) ? max_t : NAN;
+
+  # ── Min temperature ───────────────────────────────────────────────────────
+  - platform: template
+    id: bms${bms_id}_min_temperature
+    name: "${bms_name} Min Temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    update_interval: ${bms_update_interval}
+    lambda: |-
+      float t, min_t = 100.0f;
+      t = id(bms${bms_id}_temperature_1).state; if (!isnan(t) && t < min_t) min_t = t;
+      t = id(bms${bms_id}_temperature_2).state; if (!isnan(t) && t < min_t) min_t = t;
+      t = id(bms${bms_id}_temperature_3).state; if (!isnan(t) && t < min_t) min_t = t;
+      t = id(bms${bms_id}_temperature_4).state; if (!isnan(t) && t < min_t) min_t = t;
+      return (min_t < 100.0f) ? min_t : NAN;
+
+  # ── Cycle count ───────────────────────────────────────────────────────────
+  - platform: seplos_bms
+    seplos_bms_id: ruixu_bms_${bms_id}
+    cycle_count:
+      id: bms${bms_id}_cycle_count
+      name: "${bms_name} Cycle Count"
+      accuracy_decimals: 0
+      state_class: total_increasing
+
+  # ── Errors bitmask ────────────────────────────────────────────────────────
+  - platform: seplos_bms
+    seplos_bms_id: ruixu_bms_${bms_id}
+    errors_bitmask:
+      id: bms${bms_id}_errors_bitmask
+      name: "${bms_name} Errors Bitmask"
+      accuracy_decimals: 0
+
+
+# ---------------------------------------------------------------------------
+# Binary sensors — YamBMS bms_combine uses all three of these IDs
+# ---------------------------------------------------------------------------
+binary_sensor:
+
+  # Charging switch — charge FET is ON when no charge-protection bit is set
+  - platform: template
+    id: bms${bms_id}_charging_switch
+    name: "${bms_name} Charging Switch"
+    device_class: battery_charging
+    lambda: |-
+      // Bit 0 of errors_bitmask = charge over-protection active.
+      // Return true (charging allowed) when that bit is clear.
+      if (!isnan(id(bms${bms_id}_errors_bitmask).state))
+        return ((int)id(bms${bms_id}_errors_bitmask).state & 0x0001) == 0;
+      return false;
+
+  # Discharging switch — discharge FET is ON when no discharge-protection bit
+  - platform: template
+    id: bms${bms_id}_discharging_switch
+    name: "${bms_name} Discharging Switch"
+    lambda: |-
+      // Bit 1 of errors_bitmask = discharge over-protection active.
+      if (!isnan(id(bms${bms_id}_errors_bitmask).state))
+        return ((int)id(bms${bms_id}_errors_bitmask).state & 0x0002) == 0;
+      return false;
+
+  # Online status — BMS is reachable when voltage is a plausible non-zero value
+  - platform: template
+    id: bms${bms_id}_online_status
+    name: "${bms_name} Online Status"
+    device_class: connectivity
+    lambda: |-
+      return !isnan(id(bms${bms_id}_total_voltage).state) &&
+             id(bms${bms_id}_total_voltage).state > 1.0f;
