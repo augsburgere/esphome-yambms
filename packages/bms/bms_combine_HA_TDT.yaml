@@ -9,7 +9,7 @@
 
 packages:
   bms_base:            !include bms_base.yaml
-  bms_temperature:     !include bms_temperature_sensor_1.yaml
+  bms_temperature:     !include bms_temperature_sensor_2.yaml
   bms_errors_bitmask:  !include bms_errors_bitmask_JBD.yaml
   bms_battery_soh:     !include bms_base_battery_soh.yaml
 
@@ -106,7 +106,7 @@ sensor:
     on_value:
       then:
         - sensor.template.publish:
-            id: bms${bms_id}_temperature_sensor_1
+            id: bms${bms_id}_temperature_sensor_2
             state: !lambda return x;
 
   - platform: homeassistant
@@ -169,7 +169,7 @@ sensor:
     accuracy_decimals: 0
     state_class: measurement
     update_interval: 60s
-    lambda: return 105;   # ← replace with actual Ah e.g. 280
+    lambda: return ${bms_max_charge_current};   # ← replace with actual Ah e.g. 280
 
   - platform: template
     id: bms${bms_id}_battery_capacity_remaining
