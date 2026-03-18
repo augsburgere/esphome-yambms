@@ -141,16 +141,18 @@ sensor:
     id: bms${bms_id}_ha_problem
     entity_id: binary_sensor.hs010501aa25500075_problem
     internal: true
-    on_state:
+    on_value:
       then:
         - sensor.template.publish:
             id: bms${bms_id}_errors_bitmask
             state: !lambda |-
-              if (x) return 1;
+              if (x > 0) return 1;
               return 0;
         - binary_sensor.template.publish:
             id: bms${bms_id}_online_status
-            state: !lambda return !x;
+            state: !lambda |-
+              if (x > 0) return false;
+              return true;
 
   # ── Template sensors ───────────────────────────────────────────────────────
 
