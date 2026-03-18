@@ -1,42 +1,28 @@
-# BMS package - pulls TDT BLE BMS data from Home Assistant API
-# Uses the FAKE BMS pattern to inject HA sensor data into YamBMS
-# Place in: packages/bms/bms_combine_HA_TDT.yaml
+# Updated : 2026.03.18
+# Version : 1.0.0
+# Pulls TDT BLE BMS data from Home Assistant API and presents it to YamBMS
+# Place this file at: packages/bms/bms_combine_HA_TDT.yaml in your fork
 
-substitutions:
-  # These are overridden by vars: in your main.yaml
-  bms_id: "3"
-  bms_name: "TDT BMS"
-  bms_max_charge_current: "100"
-  bms_max_discharge_current: "100"
-  bms_cell_ovp: "3.650"
-  bms_cell_uvp: "2.800"
-  bms_balance_trigger_voltage: "0.010"
-  bms_cell_max_cycles: "6000.0"
+# Required vars (set in main.yaml):
+#   bms_id, bms_name, bms_max_charge_current, bms_max_discharge_current,
+#   bms_cell_ovp, bms_cell_uvp, bms_balance_trigger_voltage, bms_cell_max_cycles
 
-globals:
-  - id: bms${bms_id}_max_charge_current
-    type: float
-    initial_value: "${bms_max_charge_current}"
-  - id: bms${bms_id}_max_discharge_current
-    type: float
-    initial_value: "${bms_max_discharge_current}"
-  - id: bms${bms_id}_cell_ovp
-    type: float
-    initial_value: "${bms_cell_ovp}"
-  - id: bms${bms_id}_cell_uvp
-    type: float
-    initial_value: "${bms_cell_uvp}"
-  - id: bms${bms_id}_balance_trigger_voltage
-    type: float
-    initial_value: "${bms_balance_trigger_voltage}"
-  - id: bms${bms_id}_cell_max_cycles
-    type: float
-    initial_value: "${bms_cell_max_cycles}"
+packages:
+  bms_base:            !include bms_base.yaml
+  bms_temperature:     !include bms_temperature_sensor_1.yaml
+  bms_errors_bitmask:  !include bms_errors_bitmask_JBD.yaml
+  bms_battery_soh:     !include bms_base_battery_soh.yaml
+
+# +--------------------------------------+
+# | Pull data from Home Assistant        |
+# +--------------------------------------+
 
 sensor:
-  # Pull from HA via native API
+
+  # ── HA source sensors (internal) ──────────────────────────────────────────
+
   - platform: homeassistant
-    id: bms${bms_id}_ha_voltage
+    id: bms${bms_id}_ha_total_voltage
     entity_id: sensor.hs010501aa25500075_voltage
     internal: true
     on_value:
@@ -54,6 +40,21 @@ sensor:
         - sensor.template.publish:
             id: bms${bms_id}_current
             state: !lambda return x;
+        # power = voltage * current, keep in sync
+        - sensor.template.publish:
+            id: bms${bms_id}_power
+            state: !lambda return id(bms${bms_id}_total_voltage).state * x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_battery_capacity
+    entity_id: sensor.hs010501aa25500075_stored_energy   # Wh - converted below
+    internal: true
+    on_value:
+      then:
+        # stored_energy is in Wh; divide by nominal voltage (48V) to get Ah
+        - sensor.template.publish:
+            id: bms${bms_id}_battery_capacity_remaining
+            state: !lambda return x / id(bms${bms_id}_total_voltage).state;
 
   - platform: homeassistant
     id: bms${bms_id}_ha_soc
@@ -62,27 +63,11 @@ sensor:
     on_value:
       then:
         - sensor.template.publish:
-            id: bms${bms_id}_battery_soc
+            id: bms${bms_id}_state_of_charge
             state: !lambda return x;
 
   - platform: homeassistant
-    id: bms${bms_id}_ha_temperature
-    entity_id: sensor.hs010501aa25500075_temperature
-    internal: true
-    filters:
-      # Remove this filter if HA reports temperature in °C already
-      - lambda: return (x - 32.0) * 5.0 / 9.0;
-    on_value:
-      then:
-        - sensor.template.publish:
-            id: bms${bms_id}_max_temperature
-            state: !lambda return x;
-        - sensor.template.publish:
-            id: bms${bms_id}_min_temperature
-            state: !lambda return x;
-
-  - platform: homeassistant
-    id: bms${bms_id}_ha_max_cell_v
+    id: bms${bms_id}_ha_max_cell_voltage
     entity_id: sensor.hs010501aa25500075_highest_cell_voltage
     internal: true
     on_value:
@@ -92,7 +77,7 @@ sensor:
             state: !lambda return x;
 
   - platform: homeassistant
-    id: bms${bms_id}_ha_min_cell_v
+    id: bms${bms_id}_ha_min_cell_voltage
     entity_id: sensor.hs010501aa25500075_lowest_cell_voltage
     internal: true
     on_value:
@@ -102,7 +87,7 @@ sensor:
             state: !lambda return x;
 
   - platform: homeassistant
-    id: bms${bms_id}_ha_delta_v
+    id: bms${bms_id}_ha_delta_cell_voltage
     entity_id: sensor.hs010501aa25500075_delta_cell_voltage
     internal: true
     on_value:
@@ -112,19 +97,34 @@ sensor:
             state: !lambda return x;
 
   - platform: homeassistant
-    id: bms${bms_id}_ha_cycles
+    id: bms${bms_id}_ha_temperature
+    entity_id: sensor.hs010501aa25500075_temperature
+    internal: true
+    filters:
+      # Remove this filter if HA already reports in °C
+      - lambda: return (x - 32.0) * 5.0 / 9.0;
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_temperature_sensor_1
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_charging_cycles
     entity_id: sensor.hs010501aa25500075_cycles
     internal: true
     on_value:
       then:
         - sensor.template.publish:
-            id: bms${bms_id}_charging_cycles
+            id: bms${bms_id}_charging_cycles_raw
             state: !lambda return x;
 
-  # Template sensors that YamBMS reads
+  # ── Template sensors (IDs must match exactly what bms_combine.yaml reads) ─
+
   - platform: template
     id: bms${bms_id}_total_voltage
-    name: "${bms_name} Voltage"
+    device_id: bms_${bms_id}
+    name: "total voltage"
     unit_of_measurement: V
     accuracy_decimals: 2
     device_class: voltage
@@ -132,64 +132,165 @@ sensor:
 
   - platform: template
     id: bms${bms_id}_current
-    name: "${bms_name} Current"
+    device_id: bms_${bms_id}
+    name: "current"
     unit_of_measurement: A
     accuracy_decimals: 1
     device_class: current
     state_class: measurement
 
   - platform: template
-    id: bms${bms_id}_battery_soc
-    name: "${bms_name} Battery SoC"
+    id: bms${bms_id}_power
+    device_id: bms_${bms_id}
+    name: "power"
+    unit_of_measurement: W
+    accuracy_decimals: 0
+    device_class: power
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_state_of_charge
+    device_id: bms_${bms_id}
+    name: "state of charge"
     unit_of_measurement: "%"
     accuracy_decimals: 0
     device_class: battery
     state_class: measurement
 
+  # battery_capacity — YamBMS uses this for combine logic (nominal Ah)
+  # TDT BLE BMS doesn't expose nominal capacity directly so we set it
+  # from the bms_max_charge_current var as a proxy — adjust if you know
+  # the true Ah rating of your TDT pack
+  - platform: template
+    id: bms${bms_id}_battery_capacity
+    device_id: bms_${bms_id}
+    name: "nominal capacity"
+    unit_of_measurement: Ah
+    accuracy_decimals: 0
+    state_class: measurement
+    update_interval: 60s
+    lambda: return ${bms_max_charge_current};   # ← replace with actual Ah e.g. 280
+
+  - platform: template
+    id: bms${bms_id}_battery_capacity_remaining
+    device_id: bms_${bms_id}
+    name: "capacity remaining"
+    unit_of_measurement: Ah
+    accuracy_decimals: 1
+    state_class: measurement
+
   - platform: template
     id: bms${bms_id}_max_cell_voltage
-    name: "${bms_name} Max Cell Voltage"
+    device_id: bms_${bms_id}
+    name: "max cell voltage"
     unit_of_measurement: V
     accuracy_decimals: 3
     state_class: measurement
 
   - platform: template
     id: bms${bms_id}_min_cell_voltage
-    name: "${bms_name} Min Cell Voltage"
+    device_id: bms_${bms_id}
+    name: "min cell voltage"
     unit_of_measurement: V
     accuracy_decimals: 3
     state_class: measurement
 
   - platform: template
     id: bms${bms_id}_delta_cell_voltage
-    name: "${bms_name} Delta Cell Voltage"
+    device_id: bms_${bms_id}
+    name: "delta cell voltage"
     unit_of_measurement: V
     accuracy_decimals: 3
     state_class: measurement
 
+  # min/max voltage cell NUMBER — TDT BLE BMS doesn't expose cell numbers
+  # so we default to 0; YamBMS will add (bms_id * 100) offset on top
   - platform: template
-    id: bms${bms_id}_max_temperature
-    name: "${bms_name} Max Temperature"
-    unit_of_measurement: "°C"
-    accuracy_decimals: 1
-    device_class: temperature
-    state_class: measurement
+    id: bms${bms_id}_min_voltage_cell
+    device_id: bms_${bms_id}
+    name: "min voltage cell"
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: return 0;
 
   - platform: template
-    id: bms${bms_id}_min_temperature
-    name: "${bms_name} Min Temperature"
-    unit_of_measurement: "°C"
-    accuracy_decimals: 1
-    device_class: temperature
-    state_class: measurement
+    id: bms${bms_id}_max_voltage_cell
+    device_id: bms_${bms_id}
+    name: "max voltage cell"
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: return 0;
 
   - platform: template
-    id: bms${bms_id}_charging_cycles
-    name: "${bms_name} Charging Cycles"
+    id: bms${bms_id}_charging_cycles_raw
+    device_id: bms_${bms_id}
+    name: "charging cycles"
     accuracy_decimals: 0
     state_class: total_increasing
 
+  # Charging cycle capacity (required by bms_battery_soh include)
+  - platform: template
+    id: bms${bms_id}_cycle_capacity_raw
+    device_id: bms_${bms_id}
+    name: "charging cycle capacity"
+    unit_of_measurement: Ah
+    state_class: total
+    accuracy_decimals: 0
+    update_interval: ${bms_update_interval}
+    lambda: return id(bms${bms_id}_charging_cycles_raw).state * id(bms${bms_id}_battery_capacity).state;
+
+  # Required settings — passed in from vars in main.yaml
+  - platform: template
+    id: bms${bms_id}_max_charge_current
+    device_id: bms_${bms_id}
+    name: "max charge current"
+    unit_of_measurement: A
+    accuracy_decimals: 0
+    update_interval: ${bms_update_interval}
+    lambda: return ${bms_max_charge_current};
+
+  - platform: template
+    id: bms${bms_id}_max_discharge_current
+    device_id: bms_${bms_id}
+    name: "max discharge current"
+    unit_of_measurement: A
+    accuracy_decimals: 0
+    update_interval: ${bms_update_interval}
+    lambda: return ${bms_max_discharge_current};
+
+  - platform: template
+    id: bms${bms_id}_cell_ovp
+    device_id: bms_${bms_id}
+    name: "cell ovp"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    update_interval: ${bms_update_interval}
+    lambda: return ${bms_cell_ovp};
+
+  - platform: template
+    id: bms${bms_id}_cell_uvp
+    device_id: bms_${bms_id}
+    name: "cell uvp"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    update_interval: ${bms_update_interval}
+    lambda: return ${bms_cell_uvp};
+
+  - platform: template
+    id: bms${bms_id}_bms_balance_trigger_voltage
+    device_id: bms_${bms_id}
+    name: "balance trigger voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    update_interval: ${bms_update_interval}
+    lambda: return ${bms_balance_trigger_voltage};
+
+# +--------------------------------------+
+# | Binary sensors                       |
+# +--------------------------------------+
+
 binary_sensor:
+
   - platform: homeassistant
     id: bms${bms_id}_ha_charge_mosfet
     entity_id: binary_sensor.hs010501aa25500075_charge_mosfet
@@ -218,16 +319,28 @@ binary_sensor:
       then:
         - binary_sensor.template.publish:
             id: bms${bms_id}_online_status
-            state: !lambda return !x;
+            state: !lambda return !x;   # problem=true means offline
 
+  # Template binary sensors — IDs match bms_combine.yaml exactly
   - platform: template
     id: bms${bms_id}_online_status
-    name: "${bms_name} Online Status"
+    device_id: bms_${bms_id}
+    name: "online status"
 
   - platform: template
     id: bms${bms_id}_charging_allowed
-    name: "${bms_name} Charging Allowed"
+    device_id: bms_${bms_id}
+    name: "charging"
 
   - platform: template
     id: bms${bms_id}_discharging_allowed
-    name: "${bms_name} Discharging Allowed"
+    device_id: bms_${bms_id}
+    name: "discharging"
+
+  # equalizing — TDT BLE BMS has no balancing binary sensor exposed
+  # defaults to false; won't affect combine logic negatively
+  - platform: template
+    id: bms${bms_id}_bms_equalizing
+    device_id: bms_${bms_id}
+    name: "balancing"
+    lambda: return false;
