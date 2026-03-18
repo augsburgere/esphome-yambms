@@ -157,7 +157,7 @@ packages:
   # +------------------------------------------------------------------------------+
 
   board:
-    url: https://github.com/Sleeper85/esphome-yambms
+    url: https://github.com/augsburgere/esphome-yambms
     ref: main
     refresh: 60min
     files:
@@ -201,7 +201,7 @@ packages:
   # +------------------------------------------------------------------------------+
 
   board_options:
-    url: https://github.com/Sleeper85/esphome-yambms
+    url: https://github.com/augsburgere/esphome-yambms
     ref: main
     refresh: 60min
     files:
@@ -258,7 +258,7 @@ packages:
   # >>> https://github.com/Sleeper85/esphome-yambms/tree/main/examples/single-node/
 
   bms:
-    url: https://github.com/Sleeper85/esphome-yambms
+    url: https://github.com/augsburgere/esphome-yambms
     ref: main
     refresh: 60min
     files:
@@ -305,7 +305,7 @@ packages:
   # +------------------------------------------------------------------------------+
 
   yambms:
-    url: https://github.com/Sleeper85/esphome-yambms
+    url: https://github.com/augsburgere/esphome-yambms
     ref: main
     refresh: 60min
     files:
@@ -318,7 +318,7 @@ packages:
   # +------------------------------------------------------------------------------+
 
   canbus:
-    url: https://github.com/Sleeper85/esphome-yambms
+    url: https://github.com/augsburgere/esphome-yambms
     ref: main
     refresh: 60min
     files:
@@ -339,7 +339,7 @@ packages:
   # +------------------------------------------------------------------------------+
 
   # rs485_pylon:
-  #   url: https://github.com/Sleeper85/esphome-yambms
+  #   url: https://github.com/augsburgere/esphome-yambms
   #   ref: main
   #   refresh: 60min
   #   files:
@@ -358,7 +358,7 @@ packages:
   # +------------------------------------------------------------------------------+
 
   debug:
-    url: https://github.com/Sleeper85/esphome-yambms
+    url: https://github.com/augsburgere/esphome-yambms
     ref: main
     refresh: 60min
     files:
