@@ -224,7 +224,7 @@ sensor:
   - platform: template
     id: bms${bms_id}_charging_cycles_raw
     device_id: bms_${bms_id}
-    name: "charging cycles"
+    name: "charging cycles raw"
     accuracy_decimals: 0
     state_class: total_increasing
 
