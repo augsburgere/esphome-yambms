@@ -46,10 +46,14 @@ sensor:
         # charging_power / discharging_power required by bms_base_daily_energy.yaml
         - sensor.template.publish:
             id: bms${bms_id}_charging_power
-            state: !lambda return x > 0 ? id(bms${bms_id}_total_voltage).state * x : 0;
+            state: !lambda |-
+              if (x > 0) return id(bms${bms_id}_total_voltage).state * x;
+              return 0;
         - sensor.template.publish:
             id: bms${bms_id}_discharging_power
-            state: !lambda return x < 0 ? id(bms${bms_id}_total_voltage).state * -x : 0;
+            state: !lambda |-
+              if (x < 0) return id(bms${bms_id}_total_voltage).state * -x;
+              return 0;
 
   - platform: homeassistant
     id: bms${bms_id}_ha_soc
@@ -70,7 +74,9 @@ sensor:
         # stored_energy is Wh, divide by voltage to get Ah for capacity_remaining_ah
         - sensor.template.publish:
             id: bms${bms_id}_capacity_remaining_ah
-            state: !lambda return id(bms${bms_id}_total_voltage).state > 0 ? x / id(bms${bms_id}_total_voltage).state : 0;
+            state: !lambda |-
+              if (id(bms${bms_id}_total_voltage).state > 0) return x / id(bms${bms_id}_total_voltage).state;
+              return 0;
 
   - platform: homeassistant
     id: bms${bms_id}_ha_max_cell_voltage
