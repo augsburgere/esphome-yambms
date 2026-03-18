@@ -1,0 +1,233 @@
+# BMS package - pulls TDT BLE BMS data from Home Assistant API
+# Uses the FAKE BMS pattern to inject HA sensor data into YamBMS
+# Place in: packages/bms/bms_combine_HA_TDT.yaml
+
+substitutions:
+  # These are overridden by vars: in your main.yaml
+  bms_id: "3"
+  bms_name: "TDT BMS"
+  bms_max_charge_current: "100"
+  bms_max_discharge_current: "100"
+  bms_cell_ovp: "3.650"
+  bms_cell_uvp: "2.800"
+  bms_balance_trigger_voltage: "0.010"
+  bms_cell_max_cycles: "6000.0"
+
+globals:
+  - id: bms${bms_id}_max_charge_current
+    type: float
+    initial_value: "${bms_max_charge_current}"
+  - id: bms${bms_id}_max_discharge_current
+    type: float
+    initial_value: "${bms_max_discharge_current}"
+  - id: bms${bms_id}_cell_ovp
+    type: float
+    initial_value: "${bms_cell_ovp}"
+  - id: bms${bms_id}_cell_uvp
+    type: float
+    initial_value: "${bms_cell_uvp}"
+  - id: bms${bms_id}_balance_trigger_voltage
+    type: float
+    initial_value: "${bms_balance_trigger_voltage}"
+  - id: bms${bms_id}_cell_max_cycles
+    type: float
+    initial_value: "${bms_cell_max_cycles}"
+
+sensor:
+  # Pull from HA via native API
+  - platform: homeassistant
+    id: bms${bms_id}_ha_voltage
+    entity_id: sensor.hs010501aa25500075_voltage
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_total_voltage
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_current
+    entity_id: sensor.hs010501aa25500075_current
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_current
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_soc
+    entity_id: sensor.hs010501aa25500075_battery
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_battery_soc
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_temperature
+    entity_id: sensor.hs010501aa25500075_temperature
+    internal: true
+    filters:
+      # Remove this filter if HA reports temperature in °C already
+      - lambda: return (x - 32.0) * 5.0 / 9.0;
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_max_temperature
+            state: !lambda return x;
+        - sensor.template.publish:
+            id: bms${bms_id}_min_temperature
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_max_cell_v
+    entity_id: sensor.hs010501aa25500075_highest_cell_voltage
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_max_cell_voltage
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_min_cell_v
+    entity_id: sensor.hs010501aa25500075_lowest_cell_voltage
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_min_cell_voltage
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_delta_v
+    entity_id: sensor.hs010501aa25500075_delta_cell_voltage
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_delta_cell_voltage
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cycles
+    entity_id: sensor.hs010501aa25500075_cycles
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_charging_cycles
+            state: !lambda return x;
+
+  # Template sensors that YamBMS reads
+  - platform: template
+    id: bms${bms_id}_total_voltage
+    name: "${bms_name} Voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_current
+    name: "${bms_name} Current"
+    unit_of_measurement: A
+    accuracy_decimals: 1
+    device_class: current
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_battery_soc
+    name: "${bms_name} Battery SoC"
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    device_class: battery
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_max_cell_voltage
+    name: "${bms_name} Max Cell Voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_min_cell_voltage
+    name: "${bms_name} Min Cell Voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_delta_cell_voltage
+    name: "${bms_name} Delta Cell Voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_max_temperature
+    name: "${bms_name} Max Temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_min_temperature
+    name: "${bms_name} Min Temperature"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_charging_cycles
+    name: "${bms_name} Charging Cycles"
+    accuracy_decimals: 0
+    state_class: total_increasing
+
+binary_sensor:
+  - platform: homeassistant
+    id: bms${bms_id}_ha_charge_mosfet
+    entity_id: binary_sensor.hs010501aa25500075_charge_mosfet
+    internal: true
+    on_state:
+      then:
+        - binary_sensor.template.publish:
+            id: bms${bms_id}_charging_allowed
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_discharge_mosfet
+    entity_id: binary_sensor.hs010501aa25500075_discharge_mosfet
+    internal: true
+    on_state:
+      then:
+        - binary_sensor.template.publish:
+            id: bms${bms_id}_discharging_allowed
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_problem
+    entity_id: binary_sensor.hs010501aa25500075_problem
+    internal: true
+    on_state:
+      then:
+        - binary_sensor.template.publish:
+            id: bms${bms_id}_online_status
+            state: !lambda return !x;
+
+  - platform: template
+    id: bms${bms_id}_online_status
+    name: "${bms_name} Online Status"
+
+  - platform: template
+    id: bms${bms_id}_charging_allowed
+    name: "${bms_name} Charging Allowed"
+
+  - platform: template
+    id: bms${bms_id}_discharging_allowed
+    name: "${bms_name} Discharging Allowed"
