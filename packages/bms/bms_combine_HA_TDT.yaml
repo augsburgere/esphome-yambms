@@ -169,7 +169,7 @@ sensor:
     accuracy_decimals: 0
     state_class: measurement
     update_interval: 60s
-    lambda: return ${bms_max_charge_current};   # ← replace with actual Ah e.g. 280
+    lambda: return 105;   # ← replace with actual Ah e.g. 280
 
   - platform: template
     id: bms${bms_id}_battery_capacity_remaining
