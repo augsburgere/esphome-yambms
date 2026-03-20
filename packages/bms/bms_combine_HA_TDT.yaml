@@ -7,11 +7,35 @@
 #   bms_id, bms_name, bms_max_charge_current, bms_max_discharge_current,
 #   bms_cell_ovp, bms_cell_uvp, bms_balance_trigger_voltage, bms_cell_max_cycles
 
+substitutions:
+  bms_model: "JBD"
+  bms_protocol: "BLE"
 packages:
-  bms_base:            !include bms_base.yaml
-  bms_temperature:     !include bms_temperature_sensor_2.yaml
-  bms_errors_bitmask:  !include bms_errors_bitmask_JBD.yaml
-  bms_battery_soh:     !include bms_base_battery_soh.yaml
+  bms_sensors:
+    file: bms_sensors_JBD_BLE_full.yaml
+    vars:
+      bms_id: ${bms_id}
+      bms_name: ${bms_name}
+      bms_update_interval: ${bms_update_interval}
+      bms_ble_mac_address: ${bms_ble_mac_address}
+      bms_max_charge_current: ${bms_max_charge_current}
+      bms_max_discharge_current: ${bms_max_discharge_current}
+      bms_cell_ovp: ${bms_cell_ovp}
+      bms_cell_uvp: ${bms_cell_uvp}
+      bms_balance_trigger_voltage: ${bms_balance_trigger_voltage}
+      bms_cell_max_cycles: ${bms_cell_max_cycles}
+      yambms_id: ${yambms_id}
+      yambms_update_interval: ${yambms_update_interval}
+      yambms_max_requested_discharge_current: ${yambms_max_requested_discharge_current}
+  bms_combine:
+    file: bms_combine.yaml
+    vars:
+      bms_id: ${bms_id}
+      bms_name: ${bms_name}
+      bms_update_interval: ${bms_update_interval}
+      yambms_id: ${yambms_id}
+      yambms_update_interval: ${yambms_update_interval}
+      yambms_max_requested_discharge_current: ${yambms_max_requested_discharge_current}
 
 # +--------------------------------------+
 # | Pull data from Home Assistant        |
