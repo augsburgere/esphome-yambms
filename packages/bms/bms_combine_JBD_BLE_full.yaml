@@ -1,0 +1,812 @@
+# Updated : 2026.03.20
+# Version : 2.0.0
+# GitHub  : https://github.com/syssi/esphome-jbd-bms
+# YamBMS ( Yet another multi-BMS Merging Solution )
+#
+# Fully self-contained - no nested !include or sub-packages.
+# All bms_base sub-package content and bms_combine.yaml inlined so
+# ${bms_id} substitution works correctly when called from main.yaml
+# via remote packages with vars:.
+#
+# Required vars (set in main.yaml):
+#   bms_id, bms_name, bms_ble_mac_address, bms_update_interval,
+#   bms_max_charge_current, bms_max_discharge_current,
+#   bms_cell_ovp, bms_cell_uvp, bms_balance_trigger_voltage, bms_cell_max_cycles,
+#   yambms_id, yambms_update_interval, yambms_max_requested_discharge_current
+ 
+substitutions:
+  bms_model: "JBD"
+  bms_protocol: "BLE"
+ 
+# +--------------------------------------+
+# | Sub-device registration              |
+# | (inlined from bms_base_sub_device)   |
+# +--------------------------------------+
+esphome:
+  devices:
+    - id: bms_${bms_id}
+      name: "${bms_name}"
+  on_boot:
+    then:
+      - lambda: id(${yambms_id}_var_bms_counter) += 1;
+ 
+# +--------------------------------------+
+# | Globals                              |
+# | (inlined from bms_combine.yaml       |
+# |  and bms_base_balancer.yaml)         |
+# +--------------------------------------+
+globals:
+  - id: bms${bms_id}_combined_once
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: bms${bms_id}_combined
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  # External balancer online
+  - id: bms${bms_id}_var_ext_balancer_online
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  # External balancer equalizing
+  - id: bms${bms_id}_var_ext_balancer_equalizing
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  # External balancer trigger voltage (V)
+  - id: bms${bms_id}_var_ext_balancer_trigger_voltage
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+ 
+# +--------------------------------------+
+# | OTA hook                             |
+# +--------------------------------------+
+ota:
+  on_begin:
+    then:
+      - switch.turn_off: bms${bms_id}_enable_bluetooth_connection
+      - logger.log: "BLE shutdown for flashing"
+ 
+# +--------------------------------------+
+# | JBD BLE component                   |
+# +--------------------------------------+
+external_components:
+  - source: github://syssi/esphome-jbd-bms@main
+    refresh: 0s
+ 
+esp32_ble_tracker:
+  scan_parameters:
+    active: false
+ 
+ble_client:
+  - id: ble_client${bms_id}
+    mac_address: ${bms_ble_mac_address}
+ 
+jbd_bms_ble:
+  - id: jbd_bms_ble${bms_id}
+    ble_client_id: ble_client${bms_id}
+    update_interval: ${bms_update_interval}
+ 
+# +--------------------------------------+
+# | Button                               |
+# +--------------------------------------+
+button:
+  - platform: jbd_bms_ble
+    jbd_bms_ble_id: jbd_bms_ble${bms_id}
+    retrieve_hardware_version:
+      device_id: bms_${bms_id}
+      name: "retrieve hardware version"
+ 
+# +--------------------------------------+
+# | Binary sensors                       |
+# +--------------------------------------+
+binary_sensor:
+  - platform: jbd_bms_ble
+    jbd_bms_ble_id: jbd_bms_ble${bms_id}
+    balancing:
+      id: bms${bms_id}_bms_equalizing
+      device_id: bms_${bms_id}
+    charging:
+      id: bms${bms_id}_charging_allowed
+      device_id: bms_${bms_id}
+      name: "charging"
+    discharging:
+      id: bms${bms_id}_discharging_allowed
+      device_id: bms_${bms_id}
+      name: "discharging"
+    online_status:
+      id: bms${bms_id}_online_status
+      device_id: bms_${bms_id}
+      name: "online status"
+ 
+  # ── Inlined from bms_base_balancer.yaml ───────────────────────────────────
+ 
+  - platform: template
+    id: bms${bms_id}_equalizing
+    device_id: bms_${bms_id}
+    name: "equalizing"
+    lambda: |-
+      if (id(bms${bms_id}_var_ext_balancer_online))
+        return id(bms${bms_id}_var_ext_balancer_equalizing);
+      else
+        return id(bms${bms_id}_bms_equalizing).state;
+ 
+  # ── Inlined from bms_combine.yaml ─────────────────────────────────────────
+ 
+  - platform: template
+    name: "Can be combined"
+    id: bms${bms_id}_can_be_combined
+    device_id: bms_${bms_id}
+    lambda: return (id(bms${bms_id}_online_status).state && id(bms${bms_id}_battery_capacity).state > 0);
+ 
+# +--------------------------------------+
+# | Switches                             |
+# +--------------------------------------+
+switch:
+  - platform: jbd_bms_ble
+    jbd_bms_ble_id: jbd_bms_ble${bms_id}
+    charging:
+      id: bms${bms_id}_charge_switch
+      device_id: bms_${bms_id}
+      name: "Charge switch"
+    discharging:
+      id: bms${bms_id}_discharge_switch
+      device_id: bms_${bms_id}
+      name: "Discharge switch"
+  - platform: ble_client
+    ble_client_id: ble_client${bms_id}
+    id: bms${bms_id}_enable_bluetooth_connection
+    device_id: bms_${bms_id}
+    name: "${bms_name} Enable Bluetooth connection"
+ 
+# +--------------------------------------+
+# | Sensors                              |
+# +--------------------------------------+
+sensor:
+  # ── JBD BLE platform sensors ──────────────────────────────────────────────
+  - platform: jbd_bms_ble
+    jbd_bms_ble_id: jbd_bms_ble${bms_id}
+    battery_strings:
+      device_id: bms_${bms_id}
+      name: "battery strings"
+    current:
+      id: bms${bms_id}_current
+      device_id: bms_${bms_id}
+      name: "current"
+    power:
+      id: bms${bms_id}_power
+      device_id: bms_${bms_id}
+      name: "power"
+    charging_power:
+      id: bms${bms_id}_charging_power
+      device_id: bms_${bms_id}
+      name: "charging power"
+    discharging_power:
+      id: bms${bms_id}_discharging_power
+      device_id: bms_${bms_id}
+      name: "discharging power"
+    state_of_charge:
+      id: bms${bms_id}_state_of_charge
+      device_id: bms_${bms_id}
+    nominal_capacity:
+      id: bms${bms_id}_battery_capacity
+      device_id: bms_${bms_id}
+      name: "nominal capacity"
+    charging_cycles:
+      id: bms${bms_id}_charging_cycles_raw
+      device_id: bms_${bms_id}
+    capacity_remaining:
+      id: bms${bms_id}_capacity_remaining_ah
+      device_id: bms_${bms_id}
+    total_voltage:
+      id: bms${bms_id}_total_voltage
+      device_id: bms_${bms_id}
+      name: "total voltage"
+    average_cell_voltage:
+      id: bms${bms_id}_average_cell_voltage
+      device_id: bms_${bms_id}
+      name: "average cell voltage"
+    delta_cell_voltage:
+      id: bms${bms_id}_delta_cell_voltage
+      device_id: bms_${bms_id}
+      name: "delta cell voltage"
+    min_cell_voltage:
+      id: bms${bms_id}_min_cell_voltage
+      device_id: bms_${bms_id}
+      name: "min cell voltage"
+    max_cell_voltage:
+      id: bms${bms_id}_max_cell_voltage
+      device_id: bms_${bms_id}
+      name: "max cell voltage"
+    min_voltage_cell:
+      id: bms${bms_id}_min_voltage_cell
+      device_id: bms_${bms_id}
+      name: "min voltage cell"
+    max_voltage_cell:
+      id: bms${bms_id}_max_voltage_cell
+      device_id: bms_${bms_id}
+      name: "max voltage cell"
+    temperature_1:
+      id: bms${bms_id}_temperature_sensor_1
+      device_id: bms_${bms_id}
+      name: "temperature 1"
+    temperature_2:
+      id: bms${bms_id}_temperature_sensor_2
+      device_id: bms_${bms_id}
+      name: "temperature 2"
+    temperature_3:
+      id: bms${bms_id}_temperature_sensor_3
+      device_id: bms_${bms_id}
+      name: "temperature 3"
+    temperature_4:
+      id: bms${bms_id}_temperature_sensor_4
+      device_id: bms_${bms_id}
+      name: "temperature 4"
+    temperature_5:
+      id: bms${bms_id}_temperature_sensor_5
+      device_id: bms_${bms_id}
+      name: "temperature 5"
+    temperature_6:
+      id: bms${bms_id}_temperature_sensor_6
+      device_id: bms_${bms_id}
+      name: "temperature 6"
+    cell_voltage_1:
+      device_id: bms_${bms_id}
+      name: "cell voltage 1"
+    cell_voltage_2:
+      device_id: bms_${bms_id}
+      name: "cell voltage 2"
+    cell_voltage_3:
+      device_id: bms_${bms_id}
+      name: "cell voltage 3"
+    cell_voltage_4:
+      device_id: bms_${bms_id}
+      name: "cell voltage 4"
+    cell_voltage_5:
+      device_id: bms_${bms_id}
+      name: "cell voltage 5"
+    cell_voltage_6:
+      device_id: bms_${bms_id}
+      name: "cell voltage 6"
+    cell_voltage_7:
+      device_id: bms_${bms_id}
+      name: "cell voltage 7"
+    cell_voltage_8:
+      device_id: bms_${bms_id}
+      name: "cell voltage 8"
+    cell_voltage_9:
+      device_id: bms_${bms_id}
+      name: "cell voltage 9"
+    cell_voltage_10:
+      device_id: bms_${bms_id}
+      name: "cell voltage 10"
+    cell_voltage_11:
+      device_id: bms_${bms_id}
+      name: "cell voltage 11"
+    cell_voltage_12:
+      device_id: bms_${bms_id}
+      name: "cell voltage 12"
+    cell_voltage_13:
+      device_id: bms_${bms_id}
+      name: "cell voltage 13"
+    cell_voltage_14:
+      device_id: bms_${bms_id}
+      name: "cell voltage 14"
+    cell_voltage_15:
+      device_id: bms_${bms_id}
+      name: "cell voltage 15"
+    cell_voltage_16:
+      device_id: bms_${bms_id}
+      name: "cell voltage 16"
+    operation_status_bitmask:
+      device_id: bms_${bms_id}
+      name: "operation status bitmask"
+    errors_bitmask:
+      id: bms${bms_id}_errors_bitmask
+      device_id: bms_${bms_id}
+      name: "errors bitmask"
+    balancer_status_bitmask:
+      device_id: bms_${bms_id}
+      name: "balancer status bitmask"
+    software_version:
+      device_id: bms_${bms_id}
+      name: "software version"
+ 
+  # ── Required template sensors ─────────────────────────────────────────────
+ 
+  - platform: template
+    id: bms${bms_id}_max_charge_current
+    device_id: bms_${bms_id}
+    name: "max charge current"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 0
+    unit_of_measurement: A
+    icon: mdi:current-dc
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: return ${bms_max_charge_current};
+ 
+  - platform: template
+    id: bms${bms_id}_max_discharge_current
+    device_id: bms_${bms_id}
+    name: "max discharge current"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 0
+    unit_of_measurement: A
+    icon: mdi:current-dc
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: return ${bms_max_discharge_current};
+ 
+  - platform: template
+    id: bms${bms_id}_cell_ovp
+    device_id: bms_${bms_id}
+    name: "cell ovp"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 3
+    unit_of_measurement: V
+    device_class: voltage
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 0.001
+    lambda: return ${bms_cell_ovp};
+ 
+  - platform: template
+    id: bms${bms_id}_cell_uvp
+    device_id: bms_${bms_id}
+    name: "cell uvp"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 3
+    unit_of_measurement: V
+    device_class: voltage
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 0.001
+    lambda: return ${bms_cell_uvp};
+ 
+  - platform: template
+    id: bms${bms_id}_bms_balance_trigger_voltage
+    device_id: bms_${bms_id}
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 3
+    unit_of_measurement: V
+    device_class: voltage
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 0.001
+    lambda: return ${bms_balance_trigger_voltage};
+ 
+  - platform: template
+    id: bms${bms_id}_cycle_capacity_raw
+    device_id: bms_${bms_id}
+    update_interval: ${bms_update_interval}
+    unit_of_measurement: Ah
+    state_class: total
+    icon: mdi:car-battery
+    accuracy_decimals: 0
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: return id(bms${bms_id}_charging_cycles_raw).state * id(bms${bms_id}_battery_capacity).state;
+ 
+  # ── Inlined from bms_base_balancer.yaml ───────────────────────────────────
+ 
+  - platform: template
+    id: bms${bms_id}_balance_trigger_voltage
+    device_id: bms_${bms_id}
+    name: "balancer trigger voltage"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 3
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 0.001
+    lambda: |-
+      if (id(bms${bms_id}_var_ext_balancer_online))
+        return id(bms${bms_id}_var_ext_balancer_trigger_voltage);
+      else
+        return id(bms${bms_id}_bms_balance_trigger_voltage).state;
+ 
+  # ── Inlined from bms_base_battery_soc.yaml ────────────────────────────────
+ 
+  - platform: template
+    name: "Battery SoC"
+    id: bms${bms_id}_battery_soc
+    device_id: bms_${bms_id}
+    update_interval: ${bms_update_interval}
+    unit_of_measurement: "%"
+    device_class: battery
+    accuracy_decimals: 0
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: |-
+      float soc = id(bms${bms_id}_state_of_charge).state;
+      float min_cell_v = id(bms${bms_id}_min_cell_voltage).state;
+      float cell_low_v = id(bms${bms_id}_cell_uvp).state + 0.2;
+      if (min_cell_v <= cell_low_v) return 0;
+      else return soc;
+ 
+  - platform: template
+    name: "Battery Capacity Remaining"
+    id: bms${bms_id}_battery_capacity_remaining
+    device_id: bms_${bms_id}
+    update_interval: ${bms_update_interval}
+    unit_of_measurement: Ah
+    state_class: measurement
+    icon: mdi:car-battery
+    accuracy_decimals: 0
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: |-
+      float bcr = id(bms${bms_id}_capacity_remaining_ah).state;
+      float min_cell_v = id(bms${bms_id}_min_cell_voltage).state;
+      float cell_low_v = id(bms${bms_id}_cell_uvp).state + 0.2;
+      if (min_cell_v <= cell_low_v) return 0;
+      else return bcr;
+ 
+  # ── Inlined from bms_base_charging_cycles.yaml ────────────────────────────
+ 
+  - platform: template
+    name: "charging cycles"
+    id: bms${bms_id}_charging_cycles
+    device_id: bms_${bms_id}
+    update_interval: ${bms_update_interval}
+    state_class: total
+    icon: mdi:counter
+    accuracy_decimals: 0
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: |-
+      float cycles_raw = id(bms${bms_id}_charging_cycles_raw).state;
+      if (isnan(cycles_raw)) cycles_raw = 0;
+      return cycles_raw + id(bms${bms_id}_charging_cycles_offset).state;
+ 
+  - platform: template
+    name: "total charging cycle capacity"
+    id: bms${bms_id}_cycle_capacity
+    device_id: bms_${bms_id}
+    update_interval: ${bms_update_interval}
+    unit_of_measurement: Ah
+    state_class: total
+    icon: mdi:car-battery
+    accuracy_decimals: 0
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: |-
+      float capacity_raw = id(bms${bms_id}_cycle_capacity_raw).state;
+      if (isnan(capacity_raw)) capacity_raw = 0;
+      return capacity_raw +
+             id(bms${bms_id}_charging_cycles_offset).state *
+             id(bms${bms_id}_battery_capacity).state;
+ 
+  # ── Inlined from bms_base_battery_soh.yaml ────────────────────────────────
+ 
+  - platform: template
+    name: "Battery SoH"
+    id: bms${bms_id}_battery_soh
+    device_id: bms_${bms_id}
+    unit_of_measurement: "%"
+    device_class: battery
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 0
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: return round(((id(bms${bms_id}_charging_cycles).state/${bms_cell_max_cycles})-1)*-100);
+ 
+  # ── Inlined from bms_temperature_sensor_6.yaml ────────────────────────────
+ 
+  - platform: template
+    id: bms${bms_id}_min_temperature
+    device_id: bms_${bms_id}
+    name: "min temperature"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 1
+    unit_of_measurement: °C
+    device_class: temperature
+    filters:
+      - throttle: 10s
+      - delta: 0.2
+    lambda: |-
+      float min_temperature = id(bms${bms_id}_temperature_sensor_1).state;
+      int min_temperature_sensor = (1 + ${bms_id} * 100);
+      if (id(bms${bms_id}_temperature_sensor_2).state < min_temperature) {
+        min_temperature = id(bms${bms_id}_temperature_sensor_2).state;
+        min_temperature_sensor = (2 + ${bms_id} * 100);
+      }
+      if (id(bms${bms_id}_temperature_sensor_3).state < min_temperature) {
+        min_temperature = id(bms${bms_id}_temperature_sensor_3).state;
+        min_temperature_sensor = (3 + ${bms_id} * 100);
+      }
+      if (id(bms${bms_id}_temperature_sensor_4).state < min_temperature) {
+        min_temperature = id(bms${bms_id}_temperature_sensor_4).state;
+        min_temperature_sensor = (4 + ${bms_id} * 100);
+      }
+      if (id(bms${bms_id}_temperature_sensor_5).state < min_temperature) {
+        min_temperature = id(bms${bms_id}_temperature_sensor_5).state;
+        min_temperature_sensor = (5 + ${bms_id} * 100);
+      }
+      if (id(bms${bms_id}_temperature_sensor_6).state < min_temperature) {
+        min_temperature = id(bms${bms_id}_temperature_sensor_6).state;
+        min_temperature_sensor = (6 + ${bms_id} * 100);
+      }
+      id(bms${bms_id}_min_temperature_sensor).publish_state(min_temperature_sensor);
+      return min_temperature;
+ 
+  - platform: template
+    id: bms${bms_id}_min_temperature_sensor
+    device_id: bms_${bms_id}
+    name: "min temperature sensor"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 0
+    icon: mdi:numeric
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+ 
+  - platform: template
+    id: bms${bms_id}_max_temperature
+    device_id: bms_${bms_id}
+    name: "max temperature"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 1
+    unit_of_measurement: °C
+    device_class: temperature
+    filters:
+      - throttle: 10s
+      - delta: 0.2
+    lambda: |-
+      float max_temperature = id(bms${bms_id}_temperature_sensor_1).state;
+      int max_temperature_sensor = (1 + ${bms_id} * 100);
+      if (id(bms${bms_id}_temperature_sensor_2).state > max_temperature) {
+        max_temperature = id(bms${bms_id}_temperature_sensor_2).state;
+        max_temperature_sensor = (2 + ${bms_id} * 100);
+      }
+      if (id(bms${bms_id}_temperature_sensor_3).state > max_temperature) {
+        max_temperature = id(bms${bms_id}_temperature_sensor_3).state;
+        max_temperature_sensor = (3 + ${bms_id} * 100);
+      }
+      if (id(bms${bms_id}_temperature_sensor_4).state > max_temperature) {
+        max_temperature = id(bms${bms_id}_temperature_sensor_4).state;
+        max_temperature_sensor = (4 + ${bms_id} * 100);
+      }
+      if (id(bms${bms_id}_temperature_sensor_5).state > max_temperature) {
+        max_temperature = id(bms${bms_id}_temperature_sensor_5).state;
+        max_temperature_sensor = (5 + ${bms_id} * 100);
+      }
+      if (id(bms${bms_id}_temperature_sensor_6).state > max_temperature) {
+        max_temperature = id(bms${bms_id}_temperature_sensor_6).state;
+        max_temperature_sensor = (6 + ${bms_id} * 100);
+      }
+      id(bms${bms_id}_max_temperature_sensor).publish_state(max_temperature_sensor);
+      return max_temperature;
+ 
+  - platform: template
+    id: bms${bms_id}_max_temperature_sensor
+    device_id: bms_${bms_id}
+    name: "max temperature sensor"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 0
+    icon: mdi:numeric
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+ 
+  # ── Inlined from bms_errors_bitmask_JBD.yaml ──────────────────────────────
+ 
+  - platform: template
+    id: bms${bms_id}_yambms_errors_bitmask
+    device_id: bms_${bms_id}
+    name: "YamBMS Errors Bitmask"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 0
+    icon: mdi:alert-circle-outline
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: |-
+      uint16_t bms_errors_bitmask = id(bms${bms_id}_errors_bitmask).state;
+      uint16_t yambms_errors_bitmask = 0;
+      if (bms_errors_bitmask > 0)
+      {
+        if (bms_errors_bitmask & 0x0001) yambms_errors_bitmask |= 0x0002;
+        if (bms_errors_bitmask & 0x0002) yambms_errors_bitmask |= 0x0004;
+        if (bms_errors_bitmask & 0x0004) yambms_errors_bitmask |= 0x0002;
+        if (bms_errors_bitmask & 0x0008) yambms_errors_bitmask |= 0x0004;
+        if (bms_errors_bitmask & 0x0010) yambms_errors_bitmask |= 0x0020;
+        if (bms_errors_bitmask & 0x0020) yambms_errors_bitmask |= 0x0040;
+        if (bms_errors_bitmask & 0x0040) yambms_errors_bitmask |= 0x0008;
+        if (bms_errors_bitmask & 0x0080) yambms_errors_bitmask |= 0x0010;
+        if (bms_errors_bitmask & 0x0100) yambms_errors_bitmask |= 0x0100;
+        if (bms_errors_bitmask & 0x0200) yambms_errors_bitmask |= 0x0080;
+        if (bms_errors_bitmask & 0x0400) yambms_errors_bitmask |= 0x0400;
+        if (bms_errors_bitmask & 0x0800) yambms_errors_bitmask |= 0x0800;
+        if (bms_errors_bitmask & 0x1000) yambms_errors_bitmask |= 0x0800;
+        if (bms_errors_bitmask & 0x2000) yambms_errors_bitmask |= 0x0800;
+        if (bms_errors_bitmask & 0x4000) yambms_errors_bitmask |= 0x0000;
+        if (bms_errors_bitmask & 0x8000) yambms_errors_bitmask |= 0x0000;
+      }
+      return yambms_errors_bitmask;
+ 
+  # ── Inlined from bms_base_daily_energy.yaml ───────────────────────────────
+ 
+  - platform: total_daily_energy
+    device_id: bms_${bms_id}
+    name: "Daily Charging Energy"
+    power_id: bms${bms_id}_charging_power
+    unit_of_measurement: 'kWh'
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+ 
+  - platform: total_daily_energy
+    device_id: bms_${bms_id}
+    name: "Daily Discharging Energy"
+    power_id: bms${bms_id}_discharging_power
+    unit_of_measurement: 'kWh'
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 3
+    filters:
+      - multiply: 0.001
+ 
+# +--------------------------------------+
+# | Number entities                      |
+# +--------------------------------------+
+number:
+  - platform: template
+    name: "Charging Cycles Offset"
+    id: bms${bms_id}_charging_cycles_offset
+    device_id: bms_${bms_id}
+    step: 1
+    min_value: 0
+    max_value: 3000
+    initial_value: 0
+    restore_value: true
+    icon: mdi:counter
+    optimistic: true
+    entity_category: config
+ 
+# +--------------------------------------+
+# | Text sensors                         |
+# +--------------------------------------+
+text_sensor:
+  - platform: jbd_bms_ble
+    jbd_bms_ble_id: jbd_bms_ble${bms_id}
+    errors:
+      device_id: bms_${bms_id}
+      name: "errors"
+    operation_status:
+      device_id: bms_${bms_id}
+      name: "operation status"
+    device_model:
+      device_id: bms_${bms_id}
+      name: "device model"
+ 
+# +--------------------------------------+
+# | Combine interval                     |
+# | (inlined from bms_combine.yaml)      |
+# +--------------------------------------+
+interval:
+  - interval: ${yambms_update_interval}
+    then:
+      - lambda: |-
+          if (id(${yambms_id}_var_to_combine_bms_number) == ${bms_id})
+          {
+            if (id(bms${bms_id}_can_be_combined).state)
+            {
+              if (id(bms${bms_id}_combined_once) == false)
+              {
+                id(${yambms_id}_var_total_installed_battery_capacity) += id(bms${bms_id}_battery_capacity).state;
+                id(bms${bms_id}_combined_once) = true;
+              }
+ 
+              if (id(bms${bms_id}_combined) == false)
+              {
+                id(${yambms_id}_var_to_combine_bms_counter) += 1;
+                id(bms${bms_id}_combined) = true;
+              }
+ 
+              if (id(bms${bms_id}_yambms_errors_bitmask).state > 0)
+              {
+                uint16_t errors_bitmask = id(bms${bms_id}_yambms_errors_bitmask).state;
+                id(${yambms_id}_var_errors_bitmask) |= errors_bitmask;
+                id(${yambms_id}_var_errors_bitmask_counter) += 1;
+              }
+ 
+              if (id(bms${bms_id}_charging_allowed).state)
+              {
+                id(${yambms_id}_var_charging_allowed_counter) += 1;
+                id(${yambms_id}_var_total_max_charge_current) += id(bms${bms_id}_max_charge_current).state;
+              }
+              else id(${yambms_id}_var_bms_blocking_charge_counter) += 1;
+ 
+              if (id(bms${bms_id}_discharging_allowed).state)
+              {
+                id(${yambms_id}_var_discharging_allowed_counter) += 1;
+                id(${yambms_id}_var_total_max_discharge_current) += id(bms${bms_id}_max_discharge_current).state;
+                if(id(${yambms_id}_var_total_max_discharge_current) > ${yambms_max_requested_discharge_current})
+                {
+                  id(${yambms_id}_var_total_max_discharge_current) = ${yambms_max_requested_discharge_current};
+                }
+              }
+              else id(${yambms_id}_var_bms_blocking_discharge_counter) += 1;
+ 
+              id(${yambms_id}_var_bms_total_voltage) += id(bms${bms_id}_total_voltage).state;
+              id(${yambms_id}_var_bms_total_current) += id(bms${bms_id}_current).state;
+              id(${yambms_id}_var_bms_total_power) += id(bms${bms_id}_power).state;
+              id(${yambms_id}_var_total_battery_capacity) += id(bms${bms_id}_battery_capacity).state;
+              id(${yambms_id}_var_total_battery_capacity_remaining) += id(bms${bms_id}_battery_capacity_remaining).state;
+              id(${yambms_id}_var_bms_total_soh) += id(bms${bms_id}_battery_soh).state;
+              id(${yambms_id}_var_total_charging_cycles) += id(bms${bms_id}_charging_cycles).state;
+ 
+              if (id(bms${bms_id}_equalizing).state) id(${yambms_id}_var_equalizing_counter) += 1;
+ 
+              if (id(bms${bms_id}_balance_trigger_voltage).state > id(${yambms_id}_var_max_balance_trigger_voltage))
+                id(${yambms_id}_var_max_balance_trigger_voltage) = id(bms${bms_id}_balance_trigger_voltage).state;
+ 
+              if (id(bms${bms_id}_min_cell_voltage).state < id(${yambms_id}_var_min_cell_voltage))
+              {
+                id(${yambms_id}_var_min_cell_voltage) = id(bms${bms_id}_min_cell_voltage).state;
+                id(${yambms_id}_var_min_voltage_cell) = id(bms${bms_id}_min_voltage_cell).state + (${bms_id} * 100);
+              }
+ 
+              if (id(bms${bms_id}_max_cell_voltage).state > id(${yambms_id}_var_max_cell_voltage))
+              {
+                id(${yambms_id}_var_max_cell_voltage) = id(bms${bms_id}_max_cell_voltage).state;
+                id(${yambms_id}_var_max_voltage_cell) = id(bms${bms_id}_max_voltage_cell).state + (${bms_id} * 100);
+              }
+ 
+              if (id(bms${bms_id}_cell_ovp).state < id(${yambms_id}_var_min_cell_ovp))
+                id(${yambms_id}_var_min_cell_ovp) = id(bms${bms_id}_cell_ovp).state;
+ 
+              if (id(bms${bms_id}_cell_uvp).state > id(${yambms_id}_var_max_cell_uvp))
+                id(${yambms_id}_var_max_cell_uvp) = id(bms${bms_id}_cell_uvp).state;
+ 
+              if (id(bms${bms_id}_min_temperature).state < id(${yambms_id}_var_min_temperature))
+              {
+                id(${yambms_id}_var_min_temperature) = id(bms${bms_id}_min_temperature).state;
+                id(${yambms_id}_var_min_temperature_sensor) = id(bms${bms_id}_min_temperature_sensor).state;
+              }
+ 
+              if (id(bms${bms_id}_max_temperature).state > id(${yambms_id}_var_max_temperature))
+              {
+                id(${yambms_id}_var_max_temperature) = id(bms${bms_id}_max_temperature).state;
+                id(${yambms_id}_var_max_temperature_sensor) = id(bms${bms_id}_max_temperature_sensor).state;
+              }
+            }
+            else if (id(bms${bms_id}_combined) == true)
+            {
+              id(${yambms_id}_var_to_combine_bms_counter) -= 1;
+              id(bms${bms_id}_combined) = false;
+            }
+ 
+            id(${yambms_id}_var_to_combine_bms_number)++;
+          }
