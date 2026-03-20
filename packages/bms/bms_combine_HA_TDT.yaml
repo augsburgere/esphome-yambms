@@ -8,22 +8,16 @@
 #   bms_cell_ovp, bms_cell_uvp, bms_balance_trigger_voltage, bms_cell_max_cycles
 
 substitutions:
-  bms_model: "JBD"
-  bms_protocol: "BLE"
+  bms_model: "TDT"
+  bms_protocol: "HA"
+
 packages:
-  bms_sensors:
-    file: bms_sensors_JBD_BLE_full.yaml
+  bms_base:
+    file: bms_base.yaml
     vars:
       bms_id: ${bms_id}
       bms_name: ${bms_name}
       bms_update_interval: ${bms_update_interval}
-      bms_ble_mac_address: ${bms_ble_mac_address}
-      bms_max_charge_current: ${bms_max_charge_current}
-      bms_max_discharge_current: ${bms_max_discharge_current}
-      bms_cell_ovp: ${bms_cell_ovp}
-      bms_cell_uvp: ${bms_cell_uvp}
-      bms_balance_trigger_voltage: ${bms_balance_trigger_voltage}
-      bms_cell_max_cycles: ${bms_cell_max_cycles}
       yambms_id: ${yambms_id}
       yambms_update_interval: ${yambms_update_interval}
       yambms_max_requested_discharge_current: ${yambms_max_requested_discharge_current}
