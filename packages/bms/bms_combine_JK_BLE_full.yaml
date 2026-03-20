@@ -18,15 +18,34 @@
 # along with this program. If not, see <http://www.gnu.org/licenses/gpl.html>.
 
 substitutions:
-  bms_model: "JK"
+  bms_model: "JBD"
   bms_protocol: "BLE"
-
 packages:
-  bms_base: !include bms_base.yaml
-  bms_combine: !include bms_combine.yaml
-  bms_temperature_sensor: !include bms_temperature_sensor_2.yaml
-  bms_errors_bitmask: !include bms_errors_bitmask_JK_BLE.yaml
-  bms_battery_soh: !include bms_battery_soh.yaml
+  bms_sensors:
+    file: bms_sensors_JBD_BLE_full.yaml
+    vars:
+      bms_id: ${bms_id}
+      bms_name: ${bms_name}
+      bms_update_interval: ${bms_update_interval}
+      bms_ble_mac_address: ${bms_ble_mac_address}
+      bms_max_charge_current: ${bms_max_charge_current}
+      bms_max_discharge_current: ${bms_max_discharge_current}
+      bms_cell_ovp: ${bms_cell_ovp}
+      bms_cell_uvp: ${bms_cell_uvp}
+      bms_balance_trigger_voltage: ${bms_balance_trigger_voltage}
+      bms_cell_max_cycles: ${bms_cell_max_cycles}
+      yambms_id: ${yambms_id}
+      yambms_update_interval: ${yambms_update_interval}
+      yambms_max_requested_discharge_current: ${yambms_max_requested_discharge_current}
+  bms_combine:
+    file: bms_combine.yaml
+    vars:
+      bms_id: ${bms_id}
+      bms_name: ${bms_name}
+      bms_update_interval: ${bms_update_interval}
+      yambms_id: ${yambms_id}
+      yambms_update_interval: ${yambms_update_interval}
+      yambms_max_requested_discharge_current: ${yambms_max_requested_discharge_current}
 
 ota:
   on_begin:
