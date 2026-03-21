@@ -1,5 +1,5 @@
-# Updated : 2026.03.20
-# Version : 2.0.0
+# Updated : 2026.03.21
+# Version : 2.0.1
 # Pulls TDT BLE BMS data from Home Assistant API and presents it to YamBMS
 # Place this file at: packages/bms/bms_combine_HA_TDT.yaml in your fork
 #
@@ -8,7 +8,7 @@
 # when called from main.yaml via remote packages with vars:.
 #
 # Required vars (set in main.yaml):
-#   bms_id, bms_name, bms_update_interval,
+#   bms_id, bms_name, bms_ha_device_id, bms_update_interval,
 #   bms_max_charge_current, bms_max_discharge_current,
 #   bms_cell_ovp, bms_cell_uvp, bms_balance_trigger_voltage, bms_cell_max_cycles,
 #   yambms_id, yambms_update_interval, yambms_max_requested_discharge_current
@@ -72,7 +72,7 @@ sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_total_voltage
-    entity_id: sensor.hs010501aa25500075_voltage
+    entity_id: sensor.${bms_ha_device_id}_voltage
     internal: true
     on_value:
       then:
@@ -82,7 +82,7 @@ sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_current
-    entity_id: sensor.hs010501aa25500075_current
+    entity_id: sensor.${bms_ha_device_id}_current
     internal: true
     on_value:
       then:
@@ -105,7 +105,7 @@ sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_soc
-    entity_id: sensor.hs010501aa25500075_battery
+    entity_id: sensor.${bms_ha_device_id}_battery
     internal: true
     on_value:
       then:
@@ -115,7 +115,7 @@ sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_stored_energy
-    entity_id: sensor.hs010501aa25500075_stored_energy
+    entity_id: sensor.${bms_ha_device_id}_stored_energy
     internal: true
     on_value:
       then:
@@ -128,7 +128,7 @@ sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_max_cell_voltage
-    entity_id: sensor.hs010501aa25500075_highest_cell_voltage
+    entity_id: sensor.${bms_ha_device_id}_highest_cell_voltage
     internal: true
     on_value:
       then:
@@ -138,7 +138,7 @@ sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_min_cell_voltage
-    entity_id: sensor.hs010501aa25500075_lowest_cell_voltage
+    entity_id: sensor.${bms_ha_device_id}_lowest_cell_voltage
     internal: true
     on_value:
       then:
@@ -148,7 +148,7 @@ sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_delta_cell_voltage
-    entity_id: sensor.hs010501aa25500075_delta_cell_voltage
+    entity_id: sensor.${bms_ha_device_id}_delta_cell_voltage
     internal: true
     on_value:
       then:
@@ -158,7 +158,7 @@ sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_temperature
-    entity_id: sensor.hs010501aa25500075_temperature
+    entity_id: sensor.${bms_ha_device_id}_temperature
     internal: true
     filters:
       - lambda: return (x - 32.0) * 5.0 / 9.0;
@@ -173,7 +173,7 @@ sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_charging_cycles
-    entity_id: sensor.hs010501aa25500075_cycles
+    entity_id: sensor.${bms_ha_device_id}_cycles
     internal: true
     on_value:
       then:
@@ -183,7 +183,7 @@ sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_problem
-    entity_id: binary_sensor.hs010501aa25500075_problem
+    entity_id: binary_sensor.${bms_ha_device_id}_problem
     internal: true
     on_value:
       then:
@@ -671,7 +671,7 @@ binary_sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_charge_mosfet
-    entity_id: binary_sensor.hs010501aa25500075_charge_mosfet
+    entity_id: binary_sensor.${bms_ha_device_id}_charge_mosfet
     internal: true
     on_state:
       then:
@@ -681,7 +681,7 @@ binary_sensor:
 
   - platform: homeassistant
     id: bms${bms_id}_ha_discharge_mosfet
-    entity_id: binary_sensor.hs010501aa25500075_discharge_mosfet
+    entity_id: binary_sensor.${bms_ha_device_id}_discharge_mosfet
     internal: true
     on_state:
       then:
@@ -830,3 +830,5 @@ interval:
 
             id(${yambms_id}_var_to_combine_bms_number)++;
           }
+
+ 
