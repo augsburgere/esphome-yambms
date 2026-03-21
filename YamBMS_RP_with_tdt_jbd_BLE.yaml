@@ -1,4 +1,4 @@
-# Updated : 2026.01.14
+# Updated : 2026.03.21
 # Version : 1.6.0
 # GitHub  : https://github.com/Sleeper85/esphome-yambms
 
@@ -25,37 +25,54 @@
 
 ################################################################################
 
-# If needed, configure a static IP here
-# wifi:
-#   manual_ip:
-#     static_ip: 192.168.0.85
-#     gateway: 192.168.0.1
-#     subnet: 255.255.255.0
-#     dns1: 8.8.8.8
-#     dns2: 8.8.4.4
+esphome:
+  name: waveshare-6ch-relay-rs485
+  friendly_name: 6ch-relay RS485
+ 
 
-logger:
-  level: INFO # VERBOSE / DEBUG / INFO / WARN
-  # baud_rate: 115200 # Send logs to the `hardware_uart` USB output (this consumes a UART interface)
-  # hardware_uart: UART0 # UART0 / USB_SERIAL_JTAG
+esp32:
+  board: esp32-s3-devkitc-1
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+
+api:
+  encryption:
+    key: !secret relay_api_encryption_key
 
 ota:
   - platform: esphome
+    password: !secret relay_ota_password
+    id: zone_controller_ota
 
-# Please use the native `api` component instead of the `mqtt` section.
-# If you use Home Assistant, the native API is more lightweight.
-# If there is no HA server connected to this API, the ESP32 reboots every 15 minutes to try to resolve the problem.
-# The "reboot_timeout: 0s" option will keep your ESP32 up and running even if you lose connection to your HA server.
-api:
-  reboot_timeout: 0s
+wifi:
+  ssid: augsburger
+  password: kindwind574
+  manual_ip:
+    static_ip: 192.168.86.60
+    gateway: 192.168.86.1
+    subnet: 255.255.255.0
 
-# If you don't want to use ESPHome's native API you can use MQTT instead.
-# In this case don't forget to remove the 'api:' section.
-# mqtt:
-#   broker: !secret mqtt_host
-#   username: !secret mqtt_username
-#   password: !secret mqtt_password
-#   id: mqtt_client
+#esp32_ble_tracker:
+#  scan_parameters:
+#    active: false
+
+#bluetooth_proxy:
+
+web_server:
+  port: 80
+
+preferences:
+  flash_write_interval: 24h
+
+logger:
+  level: DEBUG  #  VERBOSE / DEBUG / INFO / WARN
+  baud_rate: 921600
+  task_log_buffer_size: 2048    # default 768 is too small for hex dump lines
+
+time:
+  - platform: homeassistant
+    id: esptime
 
 # +--------------------------------------+
 # | Global Settings                      |
@@ -139,7 +156,8 @@ substitutions:
   # +--------------------------------------+
   # | BMS Settings                         |
   # +--------------------------------------+
-  bms_update_interval: '3s'    # frequency at which BMS data is refreshed, going below '3s' can cause problems
+  bms_update_interval: '10s'    # frequency at which BMS data is refreshed, going below '3s' can cause problems
+
 
 
 # +--------------------------------------+
@@ -156,51 +174,23 @@ packages:
   # +------------------------------------------------------------------------------+
 
   board:
-    url: https://github.com/Sleeper85/esphome-yambms
+    url: https://github.com/augsburgere/esphome-yambms
     ref: main
     refresh: 60min
     files:
-      - path: 'packages/board/board_ESP32_Generic.yaml'
-      # - path: 'packages/board/board_ESP32_Atom-Lite.yaml'
-      # - path: 'packages/board/board_ESP32_DevKit-V1.yaml'
-      # - path: 'packages/board/board_ESP32_EVB.yaml'
-      # - path: 'packages/board/board_ESP32_iBMS_CAN_RS485_V3.3.yaml'
-      # - path: 'packages/board/board_ESP32_LilyGo-T-CAN485.yaml'
+      #- path: 'packages/board/board_ESP32_Generic.yaml'
       # - path: 'packages/board/board_ESP32-C3_DevKitM-1.yaml'
-      # - path: 'packages/board/board_ESP32-C3_ETH01-EVO.yaml'
-      # - path: 'packages/board/board_ESP32-C3_FlipC3.yaml'
-      # - path: 'packages/board/board_ESP32-S3_AtomS3-Lite.yaml'
       # - path: 'packages/board/board_ESP32-S3_DevKitC-1_LED-38.yaml'
       # - path: 'packages/board/board_ESP32-S3_DevKitC-1_LED-48.yaml'
-      # - path: 'packages/board/board_ESP32-S3_LilyGo-T-Connect.yaml'
-      # - path: 'packages/board/board_ESP32-S3_WS-ETH.yaml'
-      # - path: 'packages/board/board_ESP32-S3_WS-RS485-CAN.yaml'
-      # - path: 'packages/board/board_ESP32-S3_WS-Touch-LCD-4.3.yaml'
-      # - path: 'packages/board/board_ESP32-S3_WS-Touch-LCD-7.yaml'
-      # - path: 'packages/board/board_ESP32-S3_XIAO.yaml'
-      # - path: 'packages/board/board_ESP32-S3_YBoard.yaml'
-
-      # - path: 'packages/board/board_ESP32-S3_AtomS3.yaml' # 'packages/board/board_ESP32-S3_AtomS3R.yaml'
-      #   vars:
-      #     display_auto_next_page_interval: '5s'
-      #     display_rotation: '0' # 0/90/180/270 rotation angle in degrees
-
-      # # LilyGo T-Connect Pro - Board
-      # - path: 'packages/board/board_ESP32-S3_LilyGo-T-Connect-Pro.yaml'
-      # # LilyGo T-Connect Pro - Display - Importing the display also activates PSRAM
-      # - path: 'packages/board/board_options_display_480x222.yaml'
-      #   vars:
-      #     display_auto_next_page_interval: '5s'
-
-
-
+       - path: 'packages/board/board_ESP32-S3_WS-RS485-CAN.yaml'
+      
   # +------------------------------------------------------------------------------+
   # | >>> Board Options
   # | >>> Uncomment your interfaces and options
   # +------------------------------------------------------------------------------+
 
   board_options:
-    url: https://github.com/Sleeper85/esphome-yambms
+    url: https://github.com/augsburgere/esphome-yambms
     ref: main
     refresh: 60min
     files:
@@ -257,69 +247,71 @@ packages:
   # >>> https://github.com/Sleeper85/esphome-yambms/tree/main/examples/single-node/
 
   bms:
-    url: https://github.com/Sleeper85/esphome-yambms
+    url: https://github.com/augsburgere/esphome-yambms
     ref: main
     refresh: 60min
     files:
-      # RS485 Sniffer with talk_pin (WS-RS485-CAN and other RS485 boards with a flow_control_pin)
-      # - path: 'packages/bms/bms_combine_JK_RS485_Modbus_sniffer_talk_pin.yaml'
-      #   vars:
-      #     sniffer_protocol: 'JK02_32S'
-      #     sniffer_uart_id: 'uart_esp_1'
-      #     sniffer_talk_pin: ${talk_pin} # can be replaced by the GPIO number
-      # RS485 Sniffer
-      - path: 'packages/bms/bms_combine_JK_RS485_Modbus_sniffer.yaml'
-        vars:
-          sniffer_protocol: 'JK02_32S'
-          sniffer_uart_id: 'uart_esp_1'
       # BMS 1
-      - path: 'packages/bms/bms_combine_JK_RS485_Modbus_bms_standard.yaml'
+      - path: 'packages/bms/bms_combine_JBD_BLE_full.yaml'
         vars:
           bms_id: '1' # must be a number
-          bms_name: 'JK-BMS 1'
-          bms_address: '0x01' # BMS 1 DIP switch
+          bms_name: 'JBD-BMS 1'
+          bms_ble_mac_address: 'A4:C1:37:37:74:78' # Your MAC address
+          # Required settings cannot be retrieved from BMS
+          # These values ​​must match your BMS settings
+          # LFP values example
+          bms_max_charge_current: '100' # A. Used to calculate maximum charge current
+          bms_max_discharge_current: '100' # A. Used to calculate maximum discharge current
+          bms_cell_ovp: '3.650' # V. Used by 'Auto CCL' functions
+          bms_cell_uvp: '2.800' # V. Used by 'Auto DCL' functions and to calculate maximum discharge voltage
+          bms_balance_trigger_voltage: '0.010' # V. Used by 'Auto CVL' functions
+          # Maximum cell charging cycles is used to calculate the battey SoH.
+          # MB31=8000.0, LF280K v3=8000.0, LF280K v2=6000.0, LF280=3000.0 (decimal is required)
+          bms_cell_max_cycles: '6000.0'
       # BMS 2
-      - path: 'packages/bms/bms_combine_JK_RS485_Modbus_bms_standard.yaml'
+      - path: 'packages/bms/bms_combine_JBD_BLE_full.yaml'
         vars:
           bms_id: '2' # must be a number
-          bms_name: 'JK-BMS 2'
-          bms_address: '0x02' # BMS 2 DIP switch
-      # BMS 3
-      - path: 'packages/bms/bms_combine_JK_RS485_Modbus_bms_standard.yaml'
+          bms_name: 'JBD-BMS 2'
+          bms_ble_mac_address: 'A4:C1:37:26:2F:23' # Your MAC address
+          # Required settings cannot be retrieved from BMS
+          # These values ​​must match your BMS settings
+          # LFP values example
+          bms_max_charge_current: '100' # A. Used to calculate maximum charge current
+          bms_max_discharge_current: '100' # A. Used to calculate maximum discharge current
+          bms_cell_ovp: '3.650' # V. Used by 'Auto CCL' functions
+          bms_cell_uvp: '2.800' # V. Used by 'Auto DCL' functions and to calculate maximum discharge voltage
+          bms_balance_trigger_voltage: '0.010' # V. Used by 'Auto CVL' functions
+          # Maximum cell charging cycles is used to calculate the battey SoH.
+          # MB31=8000.0, LF280K v3=8000.0, LF280K v2=6000.0, LF280=3000.0 (decimal is required)
+          bms_cell_max_cycles: '6000.0'
+
+      - path: 'packages/bms/bms_combine_HA_TDT.yaml'
         vars:
-          bms_id: '3' # must be a number
-          bms_name: 'JK-BMS 3'
-          bms_address: '0x03' # BMS 3 DIP switch
-      # BMS 4
-      - path: 'packages/bms/bms_combine_JK_RS485_Modbus_bms_standard.yaml'
+         bms_id: '3'
+         bms_name: 'TDT BMS 3'
+         bms_ha_device_id: 'hs010501aa25500075'
+         bms_max_charge_current: '100'
+         bms_max_discharge_current: '100'      
+         bms_cell_ovp: '3.650'                 
+         bms_cell_uvp: '2.800'                 
+         bms_balance_trigger_voltage: '0.010'  
+         bms_cell_max_cycles: '6000.0'         
+     
+
+      - path: 'packages/bms/bms_combine_HA_TDT.yaml'
         vars:
-          bms_id: '4' # must be a number
-          bms_name: 'JK-BMS 4'
-          bms_address: '0x04' # BMS 4 DIP switch
-      # BMS 5
-      - path: 'packages/bms/bms_combine_JK_RS485_Modbus_bms_standard.yaml'
-        vars:
-          bms_id: '5' # must be a number
-          bms_name: 'JK-BMS 5'
-          bms_address: '0x05' # BMS 5 DIP switch
-      # BMS 6
-      - path: 'packages/bms/bms_combine_JK_RS485_Modbus_bms_standard.yaml'
-        vars:
-          bms_id: '6' # must be a number
-          bms_name: 'JK-BMS 6'
-          bms_address: '0x06' # BMS 6 DIP switch
-      # BMS 7
-      - path: 'packages/bms/bms_combine_JK_RS485_Modbus_bms_standard.yaml'
-        vars:
-          bms_id: '7' # must be a number
-          bms_name: 'JK-BMS 7'
-          bms_address: '0x07' # BMS 7 DIP switch
-      # BMS 8
-      - path: 'packages/bms/bms_combine_JK_RS485_Modbus_bms_standard.yaml'
-        vars:
-          bms_id: '8' # must be a number
-          bms_name: 'JK-BMS 8'
-          bms_address: '0x08' # BMS 8 DIP switch
+          bms_id: '4'
+          bms_name: 'TDT BMS 4'
+          bms_ha_device_id: 'hs010501aa_25500379'
+          bms_max_charge_current: '100'
+          bms_max_discharge_current: '100'      
+          bms_cell_ovp: '3.650'                 
+          bms_cell_uvp: '2.800'                 
+          bms_balance_trigger_voltage: '0.010'  
+          bms_cell_max_cycles: '6000.0'         
+    
+
 
 
 
@@ -328,7 +320,7 @@ packages:
   # +------------------------------------------------------------------------------+
 
   yambms:
-    url: https://github.com/Sleeper85/esphome-yambms
+    url: https://github.com/augsburgere/esphome-yambms
     ref: main
     refresh: 60min
     files:
@@ -341,7 +333,7 @@ packages:
   # +------------------------------------------------------------------------------+
 
   canbus:
-    url: https://github.com/Sleeper85/esphome-yambms
+    url: https://github.com/augsburgere/esphome-yambms
     ref: main
     refresh: 60min
     files:
@@ -362,7 +354,7 @@ packages:
   # +------------------------------------------------------------------------------+
 
   # rs485_pylon:
-  #   url: https://github.com/Sleeper85/esphome-yambms
+  #   url: https://github.com/augsburgere/esphome-yambms
   #   ref: main
   #   refresh: 60min
   #   files:
@@ -380,19 +372,19 @@ packages:
   # | >>> DEBUG ( logger level must be DEBUG )
   # +------------------------------------------------------------------------------+
 
-  debug:
-    url: https://github.com/Sleeper85/esphome-yambms
-    ref: main
-    refresh: 60min
-    files:
-      - path: packages/base/device_debug_ESP32.yaml
-      # - path: packages/base/device_debug_ESP32_PSRAM.yaml
-        vars:
-          debug_name: 'Debug'
-          debug_update_interval: '5s'
+  #debug:
+  #  url: https://github.com/Sleeper85/esphome-yambms
+  #  ref: main
+   # refresh: 60min
+  #  files:
+  #    - path: packages/base/device_debug_ESP32.yaml
+ ##     # - path: packages/base/device_debug_ESP32_PSRAM.yaml
+   #     vars:
+  #        debug_name: 'Debug'
+  #       debug_update_interval: '5s'
           # Size of your PSRAM in bits
-          # 8Mb='8388608' | 6Mb='6291456' | 4Mb='4194304' | 2Mb='2097152' | NoPSRAM='0'
-          debug_psram_size: '8388608'
+  #       # 8Mb='8388608' | 6Mb='6291456' | 4Mb='4194304' | 2Mb='2097152' | NoPSRAM='0'
+   #       debug_psram_size: '8388608'
 
 
 
