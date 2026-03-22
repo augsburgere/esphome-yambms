@@ -1,0 +1,1244 @@
+# Updated : 2026.03.22
+# Version : 1.0.0
+# Pulls Sungold BMS data from Home Assistant API (batt_1) and presents it to YamBMS
+# Place this file at: packages/bms/bms_combine_HA_Sungold_batt1.yaml in your fork
+#
+# Fully self-contained - no nested !include or sub-packages.
+# All sub-package content inlined so ${bms_id} substitution works correctly
+# when called from main.yaml via remote packages with vars:.
+#
+# Required vars (set in main.yaml):
+#   bms_id, bms_name, bms_ha_device_id, bms_update_interval,
+#   bms_max_charge_current, bms_max_discharge_current,
+#   bms_cell_ovp, bms_cell_uvp, bms_balance_trigger_voltage, bms_cell_max_cycles,
+#   yambms_id, yambms_update_interval, yambms_max_requested_discharge_current
+#
+# Set in main.yaml for this battery:
+#   bms_ha_device_id: yambms_batt_1
+#
+# Notes:
+#   - Power (in/out/net) and daily energy are pulled directly from HA.
+#   - All 16 cell voltages are pulled and exposed as template sensors.
+#   - 6 temperature sensors pulled; temp 1 & 2 feed YamBMS sensor_1 / sensor_2.
+#     Temps 3, 4, mosfet, and environment are exposed as additional template sensors.
+#   - Min/max temperature scans all 6 sensors.
+#   - Battery capacity is pulled live from HA; swap to a fixed lambda if unavailable.
+#   - Temperature assumed °C from HA. Add a F→C filter lambda if your HA reports °F.
+#   - No binary_sensor.*_problem entity seen; online_status defaults true on boot.
+#     Add a homeassistant binary_sensor source if your device exposes one.
+
+# +--------------------------------------+
+# | Sub-device registration              |
+# +--------------------------------------+
+esphome:
+  devices:
+    - id: bms_${bms_id}
+      name: "${bms_name}"
+  on_boot:
+    then:
+      - lambda: id(${yambms_id}_var_bms_counter) += 1;
+      - binary_sensor.template.publish:
+          id: bms${bms_id}_charging_allowed
+          state: true
+      - binary_sensor.template.publish:
+          id: bms${bms_id}_discharging_allowed
+          state: true
+      - binary_sensor.template.publish:
+          id: bms${bms_id}_online_status
+          state: true
+
+# +--------------------------------------+
+# | Globals                              |
+# +--------------------------------------+
+globals:
+  - id: bms${bms_id}_combined_once
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: bms${bms_id}_combined
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: bms${bms_id}_var_ext_balancer_online
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: bms${bms_id}_var_ext_balancer_equalizing
+    type: bool
+    restore_value: no
+    initial_value: "false"
+  - id: bms${bms_id}_var_ext_balancer_trigger_voltage
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+
+# +--------------------------------------+
+# | Pull data from Home Assistant        |
+# +--------------------------------------+
+sensor:
+
+  # ── HA source sensors (internal) ──────────────────────────────────────────
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_total_voltage
+    entity_id: sensor.${bms_ha_device_id}_voltage_total
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_total_voltage
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_current
+    entity_id: sensor.${bms_ha_device_id}_current
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_current
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_power_net
+    entity_id: sensor.${bms_ha_device_id}_power_net
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_power
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_power_in
+    entity_id: sensor.${bms_ha_device_id}_power_in
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_charging_power
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_power_out
+    entity_id: sensor.${bms_ha_device_id}_power_out
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_discharging_power
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_daily_energy_in
+    entity_id: sensor.${bms_ha_device_id}_daily_energy_in
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_daily_charging_energy
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_daily_energy_out
+    entity_id: sensor.${bms_ha_device_id}_daily_energy_out
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_daily_discharging_energy
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_soc
+    entity_id: sensor.${bms_ha_device_id}_state_of_charge
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_state_of_charge
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_remaining_capacity
+    entity_id: sensor.${bms_ha_device_id}_remaining_capacity
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_capacity_remaining_ah
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_battery_capacity
+    entity_id: sensor.${bms_ha_device_id}_battery_capacity
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_battery_capacity
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_max_cell_voltage
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_max
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_max_cell_voltage
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_min_cell_voltage
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_min
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_min_cell_voltage
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_delta_cell_voltage
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_delta
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_delta_cell_voltage
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_max_voltage_cell_number
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_max_number
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_max_voltage_cell
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_min_voltage_cell_number
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_min_number
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_min_voltage_cell
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_charging_cycles
+    entity_id: sensor.${bms_ha_device_id}_charging_cycles
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_charging_cycles_raw
+            state: !lambda return x;
+
+  # ── Individual cell voltages ───────────────────────────────────────────────
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_1
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_1
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_1
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_2
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_2
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_2
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_3
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_3
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_3
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_4
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_4
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_4
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_5
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_5
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_5
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_6
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_6
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_6
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_7
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_7
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_7
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_8
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_8
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_8
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_9
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_9
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_9
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_10
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_10
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_10
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_11
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_11
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_11
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_12
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_12
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_12
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_13
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_13
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_13
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_14
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_14
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_14
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_15
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_15
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_15
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_cell_voltage_16
+    entity_id: sensor.${bms_ha_device_id}_voltage_cell_16
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_cell_voltage_16
+            state: !lambda return x;
+
+  # ── Temperature sensors ────────────────────────────────────────────────────
+  # temp_1 → YamBMS temperature_sensor_1, temp_2 → temperature_sensor_2
+  # temp_3, temp_4, mosfet, environment exposed for visibility only
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_temperature_1
+    entity_id: sensor.${bms_ha_device_id}_temperature_1
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_temperature_sensor_1
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_temperature_2
+    entity_id: sensor.${bms_ha_device_id}_temperature_2
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_temperature_sensor_2
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_temperature_3
+    entity_id: sensor.${bms_ha_device_id}_temperature_3
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_temperature_3
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_temperature_4
+    entity_id: sensor.${bms_ha_device_id}_temperature_4
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_temperature_4
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_temperature_mosfet
+    entity_id: sensor.${bms_ha_device_id}_temperature_mosfet
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_temperature_mosfet
+            state: !lambda return x;
+
+  - platform: homeassistant
+    id: bms${bms_id}_ha_temperature_environment
+    entity_id: sensor.${bms_ha_device_id}_temperature_environment
+    internal: true
+    on_value:
+      then:
+        - sensor.template.publish:
+            id: bms${bms_id}_temperature_environment
+            state: !lambda return x;
+
+  # ── Template sensors ───────────────────────────────────────────────────────
+
+  - platform: template
+    id: bms${bms_id}_total_voltage
+    device_id: bms_${bms_id}
+    name: "total voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_current
+    device_id: bms_${bms_id}
+    name: "current"
+    unit_of_measurement: A
+    accuracy_decimals: 1
+    device_class: current
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_power
+    device_id: bms_${bms_id}
+    name: "power"
+    unit_of_measurement: W
+    accuracy_decimals: 0
+    device_class: power
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_charging_power
+    device_id: bms_${bms_id}
+    name: "charging power"
+    unit_of_measurement: W
+    accuracy_decimals: 0
+    device_class: power
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_discharging_power
+    device_id: bms_${bms_id}
+    name: "discharging power"
+    unit_of_measurement: W
+    accuracy_decimals: 0
+    device_class: power
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_daily_charging_energy
+    device_id: bms_${bms_id}
+    name: "Daily Charging Energy"
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+
+  - platform: template
+    id: bms${bms_id}_daily_discharging_energy
+    device_id: bms_${bms_id}
+    name: "Daily Discharging Energy"
+    unit_of_measurement: kWh
+    accuracy_decimals: 3
+    device_class: energy
+    state_class: total_increasing
+
+  - platform: template
+    id: bms${bms_id}_state_of_charge
+    device_id: bms_${bms_id}
+    name: "state of charge"
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    device_class: battery
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_capacity_remaining_ah
+    device_id: bms_${bms_id}
+    name: "capacity remaining ah"
+    unit_of_measurement: Ah
+    accuracy_decimals: 1
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_battery_capacity
+    device_id: bms_${bms_id}
+    name: "nominal capacity"
+    unit_of_measurement: Ah
+    accuracy_decimals: 0
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_max_cell_voltage
+    device_id: bms_${bms_id}
+    name: "max cell voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_min_cell_voltage
+    device_id: bms_${bms_id}
+    name: "min cell voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_delta_cell_voltage
+    device_id: bms_${bms_id}
+    name: "delta cell voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_min_voltage_cell
+    device_id: bms_${bms_id}
+    name: "min voltage cell"
+    accuracy_decimals: 0
+
+  - platform: template
+    id: bms${bms_id}_max_voltage_cell
+    device_id: bms_${bms_id}
+    name: "max voltage cell"
+    accuracy_decimals: 0
+
+  # ── Individual cell voltage template sensors ───────────────────────────────
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_1
+    device_id: bms_${bms_id}
+    name: "cell voltage 1"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_2
+    device_id: bms_${bms_id}
+    name: "cell voltage 2"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_3
+    device_id: bms_${bms_id}
+    name: "cell voltage 3"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_4
+    device_id: bms_${bms_id}
+    name: "cell voltage 4"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_5
+    device_id: bms_${bms_id}
+    name: "cell voltage 5"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_6
+    device_id: bms_${bms_id}
+    name: "cell voltage 6"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_7
+    device_id: bms_${bms_id}
+    name: "cell voltage 7"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_8
+    device_id: bms_${bms_id}
+    name: "cell voltage 8"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_9
+    device_id: bms_${bms_id}
+    name: "cell voltage 9"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_10
+    device_id: bms_${bms_id}
+    name: "cell voltage 10"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_11
+    device_id: bms_${bms_id}
+    name: "cell voltage 11"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_12
+    device_id: bms_${bms_id}
+    name: "cell voltage 12"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_13
+    device_id: bms_${bms_id}
+    name: "cell voltage 13"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_14
+    device_id: bms_${bms_id}
+    name: "cell voltage 14"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_15
+    device_id: bms_${bms_id}
+    name: "cell voltage 15"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_cell_voltage_16
+    device_id: bms_${bms_id}
+    name: "cell voltage 16"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    state_class: measurement
+
+  # ── Temperature template sensors ───────────────────────────────────────────
+
+  - platform: template
+    id: bms${bms_id}_temperature_sensor_1
+    device_id: bms_${bms_id}
+    name: "temperature 1"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_temperature_sensor_2
+    device_id: bms_${bms_id}
+    name: "temperature 2"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_temperature_3
+    device_id: bms_${bms_id}
+    name: "temperature 3"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_temperature_4
+    device_id: bms_${bms_id}
+    name: "temperature 4"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_temperature_mosfet
+    device_id: bms_${bms_id}
+    name: "temperature mosfet"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_temperature_environment
+    device_id: bms_${bms_id}
+    name: "temperature environment"
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_errors_bitmask
+    device_id: bms_${bms_id}
+    name: "errors bitmask"
+    accuracy_decimals: 0
+    state_class: measurement
+
+  - platform: template
+    id: bms${bms_id}_charging_cycles_raw
+    device_id: bms_${bms_id}
+    name: "charging cycles raw"
+    accuracy_decimals: 0
+    state_class: total_increasing
+
+  - platform: template
+    id: bms${bms_id}_cycle_capacity_raw
+    device_id: bms_${bms_id}
+    name: "charging cycle capacity"
+    unit_of_measurement: Ah
+    state_class: total
+    accuracy_decimals: 0
+    update_interval: ${bms_update_interval}
+    lambda: return id(bms${bms_id}_charging_cycles_raw).state * id(bms${bms_id}_battery_capacity).state;
+
+  - platform: template
+    id: bms${bms_id}_max_charge_current
+    device_id: bms_${bms_id}
+    name: "max charge current"
+    unit_of_measurement: A
+    accuracy_decimals: 0
+    update_interval: ${bms_update_interval}
+    lambda: return ${bms_max_charge_current};
+
+  - platform: template
+    id: bms${bms_id}_max_discharge_current
+    device_id: bms_${bms_id}
+    name: "max discharge current"
+    unit_of_measurement: A
+    accuracy_decimals: 0
+    update_interval: ${bms_update_interval}
+    lambda: return ${bms_max_discharge_current};
+
+  - platform: template
+    id: bms${bms_id}_cell_ovp
+    device_id: bms_${bms_id}
+    name: "cell ovp"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    update_interval: ${bms_update_interval}
+    lambda: return ${bms_cell_ovp};
+
+  - platform: template
+    id: bms${bms_id}_cell_uvp
+    device_id: bms_${bms_id}
+    name: "cell uvp"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    update_interval: ${bms_update_interval}
+    lambda: return ${bms_cell_uvp};
+
+  - platform: template
+    id: bms${bms_id}_bms_balance_trigger_voltage
+    device_id: bms_${bms_id}
+    name: "balance trigger voltage"
+    unit_of_measurement: V
+    accuracy_decimals: 3
+    update_interval: ${bms_update_interval}
+    lambda: return ${bms_balance_trigger_voltage};
+
+  # ── Balancer trigger voltage ───────────────────────────────────────────────
+
+  - platform: template
+    id: bms${bms_id}_balance_trigger_voltage
+    device_id: bms_${bms_id}
+    name: "balancer trigger voltage"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 3
+    unit_of_measurement: V
+    device_class: voltage
+    state_class: measurement
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 0.001
+    lambda: |-
+      if (id(bms${bms_id}_var_ext_balancer_online))
+        return id(bms${bms_id}_var_ext_balancer_trigger_voltage);
+      else
+        return id(bms${bms_id}_bms_balance_trigger_voltage).state;
+
+  # ── Battery SoC (with low-voltage cutoff) ─────────────────────────────────
+
+  - platform: template
+    name: "Battery SoC"
+    id: bms${bms_id}_battery_soc
+    device_id: bms_${bms_id}
+    update_interval: ${bms_update_interval}
+    unit_of_measurement: "%"
+    device_class: battery
+    accuracy_decimals: 0
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: |-
+      float soc = id(bms${bms_id}_state_of_charge).state;
+      float min_cell_v = id(bms${bms_id}_min_cell_voltage).state;
+      float cell_low_v = id(bms${bms_id}_cell_uvp).state + 0.2;
+      if (min_cell_v <= cell_low_v) return 0;
+      else return soc;
+
+  - platform: template
+    name: "Battery Capacity Remaining"
+    id: bms${bms_id}_battery_capacity_remaining
+    device_id: bms_${bms_id}
+    update_interval: ${bms_update_interval}
+    unit_of_measurement: Ah
+    state_class: measurement
+    icon: mdi:car-battery
+    accuracy_decimals: 0
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: |-
+      float bcr = id(bms${bms_id}_capacity_remaining_ah).state;
+      float min_cell_v = id(bms${bms_id}_min_cell_voltage).state;
+      float cell_low_v = id(bms${bms_id}_cell_uvp).state + 0.2;
+      if (min_cell_v <= cell_low_v) return 0;
+      else return bcr;
+
+  # ── Charging cycles ────────────────────────────────────────────────────────
+
+  - platform: template
+    name: "charging cycles"
+    id: bms${bms_id}_charging_cycles
+    device_id: bms_${bms_id}
+    update_interval: ${bms_update_interval}
+    state_class: total
+    icon: mdi:counter
+    accuracy_decimals: 0
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: |-
+      float cycles_raw = id(bms${bms_id}_charging_cycles_raw).state;
+      if (isnan(cycles_raw)) cycles_raw = 0;
+      return cycles_raw + id(bms${bms_id}_charging_cycles_offset).state;
+
+  - platform: template
+    name: "total charging cycle capacity"
+    id: bms${bms_id}_cycle_capacity
+    device_id: bms_${bms_id}
+    update_interval: ${bms_update_interval}
+    unit_of_measurement: Ah
+    state_class: total
+    icon: mdi:car-battery
+    accuracy_decimals: 0
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: |-
+      float capacity_raw = id(bms${bms_id}_cycle_capacity_raw).state;
+      if (isnan(capacity_raw)) capacity_raw = 0;
+      return capacity_raw +
+             id(bms${bms_id}_charging_cycles_offset).state *
+             id(bms${bms_id}_battery_capacity).state;
+
+  # ── Battery SoH ────────────────────────────────────────────────────────────
+
+  - platform: template
+    name: "Battery SoH"
+    id: bms${bms_id}_battery_soh
+    device_id: bms_${bms_id}
+    unit_of_measurement: "%"
+    device_class: battery
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 0
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: return round(((id(bms${bms_id}_charging_cycles).state/${bms_cell_max_cycles})-1)*-100);
+
+  # ── Min / max temperature (scans all 6 sensors) ───────────────────────────
+
+  - platform: template
+    id: bms${bms_id}_min_temperature
+    device_id: bms_${bms_id}
+    name: "min temperature"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 1
+    unit_of_measurement: °C
+    device_class: temperature
+    filters:
+      - throttle: 10s
+      - delta: 0.2
+    lambda: |-
+      float t1 = id(bms${bms_id}_temperature_sensor_1).state;
+      float t2 = id(bms${bms_id}_temperature_sensor_2).state;
+      float t3 = id(bms${bms_id}_temperature_3).state;
+      float t4 = id(bms${bms_id}_temperature_4).state;
+      float tm = id(bms${bms_id}_temperature_mosfet).state;
+      float te = id(bms${bms_id}_temperature_environment).state;
+      float min_t = t1;
+      int min_s = (1 + ${bms_id} * 100);
+      if (!isnan(t2) && t2 < min_t) { min_t = t2; min_s = (2 + ${bms_id} * 100); }
+      if (!isnan(t3) && t3 < min_t) { min_t = t3; min_s = (3 + ${bms_id} * 100); }
+      if (!isnan(t4) && t4 < min_t) { min_t = t4; min_s = (4 + ${bms_id} * 100); }
+      if (!isnan(tm) && tm < min_t) { min_t = tm;  min_s = (5 + ${bms_id} * 100); }
+      if (!isnan(te) && te < min_t) { min_t = te;  min_s = (6 + ${bms_id} * 100); }
+      id(bms${bms_id}_min_temperature_sensor).publish_state(min_s);
+      return min_t;
+
+  - platform: template
+    id: bms${bms_id}_min_temperature_sensor
+    device_id: bms_${bms_id}
+    name: "min temperature sensor"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 0
+    icon: mdi:numeric
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+
+  - platform: template
+    id: bms${bms_id}_max_temperature
+    device_id: bms_${bms_id}
+    name: "max temperature"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 1
+    unit_of_measurement: °C
+    device_class: temperature
+    filters:
+      - throttle: 10s
+      - delta: 0.2
+    lambda: |-
+      float t1 = id(bms${bms_id}_temperature_sensor_1).state;
+      float t2 = id(bms${bms_id}_temperature_sensor_2).state;
+      float t3 = id(bms${bms_id}_temperature_3).state;
+      float t4 = id(bms${bms_id}_temperature_4).state;
+      float tm = id(bms${bms_id}_temperature_mosfet).state;
+      float te = id(bms${bms_id}_temperature_environment).state;
+      float max_t = t1;
+      int max_s = (1 + ${bms_id} * 100);
+      if (!isnan(t2) && t2 > max_t) { max_t = t2; max_s = (2 + ${bms_id} * 100); }
+      if (!isnan(t3) && t3 > max_t) { max_t = t3; max_s = (3 + ${bms_id} * 100); }
+      if (!isnan(t4) && t4 > max_t) { max_t = t4; max_s = (4 + ${bms_id} * 100); }
+      if (!isnan(tm) && tm > max_t) { max_t = tm;  max_s = (5 + ${bms_id} * 100); }
+      if (!isnan(te) && te > max_t) { max_t = te;  max_s = (6 + ${bms_id} * 100); }
+      id(bms${bms_id}_max_temperature_sensor).publish_state(max_s);
+      return max_t;
+
+  - platform: template
+    id: bms${bms_id}_max_temperature_sensor
+    device_id: bms_${bms_id}
+    name: "max temperature sensor"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 0
+    icon: mdi:numeric
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+
+  # ── YamBMS errors bitmask ──────────────────────────────────────────────────
+  # Sungold does not expose a raw bitmask; online_status drives errors_bitmask.
+  # Bit mapping follows JBD convention as used in the TDT file.
+
+  - platform: template
+    id: bms${bms_id}_yambms_errors_bitmask
+    device_id: bms_${bms_id}
+    name: "YamBMS Errors Bitmask"
+    update_interval: ${bms_update_interval}
+    accuracy_decimals: 0
+    icon: mdi:alert-circle-outline
+    filters:
+      - or:
+        - throttle: 10s
+        - delta: 1
+    lambda: |-
+      uint16_t bms_errors_bitmask = (uint16_t)id(bms${bms_id}_errors_bitmask).state;
+      uint16_t yambms_errors_bitmask = 0;
+      if (bms_errors_bitmask > 0)
+      {
+        if (bms_errors_bitmask & 0x0001) yambms_errors_bitmask |= 0x0002;
+        if (bms_errors_bitmask & 0x0002) yambms_errors_bitmask |= 0x0004;
+        if (bms_errors_bitmask & 0x0004) yambms_errors_bitmask |= 0x0002;
+        if (bms_errors_bitmask & 0x0008) yambms_errors_bitmask |= 0x0004;
+        if (bms_errors_bitmask & 0x0010) yambms_errors_bitmask |= 0x0020;
+        if (bms_errors_bitmask & 0x0020) yambms_errors_bitmask |= 0x0040;
+        if (bms_errors_bitmask & 0x0040) yambms_errors_bitmask |= 0x0008;
+        if (bms_errors_bitmask & 0x0080) yambms_errors_bitmask |= 0x0010;
+        if (bms_errors_bitmask & 0x0100) yambms_errors_bitmask |= 0x0100;
+        if (bms_errors_bitmask & 0x0200) yambms_errors_bitmask |= 0x0080;
+        if (bms_errors_bitmask & 0x0400) yambms_errors_bitmask |= 0x0400;
+        if (bms_errors_bitmask & 0x0800) yambms_errors_bitmask |= 0x0800;
+        if (bms_errors_bitmask & 0x1000) yambms_errors_bitmask |= 0x0800;
+        if (bms_errors_bitmask & 0x2000) yambms_errors_bitmask |= 0x0800;
+        if (bms_errors_bitmask & 0x4000) yambms_errors_bitmask |= 0x0000;
+        if (bms_errors_bitmask & 0x8000) yambms_errors_bitmask |= 0x0000;
+      }
+      return yambms_errors_bitmask;
+
+# +--------------------------------------+
+# | Number entities                      |
+# +--------------------------------------+
+number:
+  - platform: template
+    name: "Charging Cycles Offset"
+    id: bms${bms_id}_charging_cycles_offset
+    device_id: bms_${bms_id}
+    step: 1
+    min_value: 0
+    max_value: 3000
+    initial_value: 0
+    restore_value: true
+    icon: mdi:counter
+    optimistic: true
+    entity_category: config
+
+# +--------------------------------------+
+# | Binary sensors                       |
+# +--------------------------------------+
+binary_sensor:
+
+  - platform: template
+    id: bms${bms_id}_online_status
+    device_id: bms_${bms_id}
+    name: "online status"
+
+  - platform: template
+    id: bms${bms_id}_charging_allowed
+    device_id: bms_${bms_id}
+    name: "charging"
+
+  - platform: template
+    id: bms${bms_id}_discharging_allowed
+    device_id: bms_${bms_id}
+    name: "discharging"
+
+  - platform: template
+    id: bms${bms_id}_bms_equalizing
+    device_id: bms_${bms_id}
+    name: "balancing"
+    lambda: return false;
+
+  - platform: template
+    id: bms${bms_id}_equalizing
+    device_id: bms_${bms_id}
+    name: "equalizing"
+    lambda: |-
+      if (id(bms${bms_id}_var_ext_balancer_online))
+        return id(bms${bms_id}_var_ext_balancer_equalizing);
+      else
+        return id(bms${bms_id}_bms_equalizing).state;
+
+  - platform: template
+    name: "Can be combined"
+    id: bms${bms_id}_can_be_combined
+    device_id: bms_${bms_id}
+    lambda: return (id(bms${bms_id}_online_status).state && id(bms${bms_id}_battery_capacity).state > 0);
+
+# +--------------------------------------+
+# | Combine interval                     |
+# +--------------------------------------+
+interval:
+  - interval: ${yambms_update_interval}
+    then:
+      - lambda: |-
+          if (id(${yambms_id}_var_to_combine_bms_number) == ${bms_id})
+          {
+            if (id(bms${bms_id}_can_be_combined).state)
+            {
+              if (id(bms${bms_id}_combined_once) == false)
+              {
+                id(${yambms_id}_var_total_installed_battery_capacity) += id(bms${bms_id}_battery_capacity).state;
+                id(bms${bms_id}_combined_once) = true;
+              }
+
+              if (id(bms${bms_id}_combined) == false)
+              {
+                id(${yambms_id}_var_to_combine_bms_counter) += 1;
+                id(bms${bms_id}_combined) = true;
+              }
+
+              if (id(bms${bms_id}_yambms_errors_bitmask).state > 0)
+              {
+                uint16_t errors_bitmask = id(bms${bms_id}_yambms_errors_bitmask).state;
+                id(${yambms_id}_var_errors_bitmask) |= errors_bitmask;
+                id(${yambms_id}_var_errors_bitmask_counter) += 1;
+              }
+
+              if (id(bms${bms_id}_charging_allowed).state)
+              {
+                id(${yambms_id}_var_charging_allowed_counter) += 1;
+                id(${yambms_id}_var_total_max_charge_current) += id(bms${bms_id}_max_charge_current).state;
+              }
+              else id(${yambms_id}_var_bms_blocking_charge_counter) += 1;
+
+              if (id(bms${bms_id}_discharging_allowed).state)
+              {
+                id(${yambms_id}_var_discharging_allowed_counter) += 1;
+                id(${yambms_id}_var_total_max_discharge_current) += id(bms${bms_id}_max_discharge_current).state;
+                if(id(${yambms_id}_var_total_max_discharge_current) > ${yambms_max_requested_discharge_current})
+                {
+                  id(${yambms_id}_var_total_max_discharge_current) = ${yambms_max_requested_discharge_current};
+                }
+              }
+              else id(${yambms_id}_var_bms_blocking_discharge_counter) += 1;
+
+              id(${yambms_id}_var_bms_total_voltage) += id(bms${bms_id}_total_voltage).state;
+              id(${yambms_id}_var_bms_total_current) += id(bms${bms_id}_current).state;
+              id(${yambms_id}_var_bms_total_power) += id(bms${bms_id}_power).state;
+              id(${yambms_id}_var_total_battery_capacity) += id(bms${bms_id}_battery_capacity).state;
+              id(${yambms_id}_var_total_battery_capacity_remaining) += id(bms${bms_id}_battery_capacity_remaining).state;
+              id(${yambms_id}_var_bms_total_soh) += id(bms${bms_id}_battery_soh).state;
+              id(${yambms_id}_var_total_charging_cycles) += id(bms${bms_id}_charging_cycles).state;
+
+              if (id(bms${bms_id}_equalizing).state) id(${yambms_id}_var_equalizing_counter) += 1;
+
+              if (id(bms${bms_id}_balance_trigger_voltage).state > id(${yambms_id}_var_max_balance_trigger_voltage))
+                id(${yambms_id}_var_max_balance_trigger_voltage) = id(bms${bms_id}_balance_trigger_voltage).state;
+
+              if (id(bms${bms_id}_min_cell_voltage).state < id(${yambms_id}_var_min_cell_voltage))
+              {
+                id(${yambms_id}_var_min_cell_voltage) = id(bms${bms_id}_min_cell_voltage).state;
+                id(${yambms_id}_var_min_voltage_cell) = id(bms${bms_id}_min_voltage_cell).state + (${bms_id} * 100);
+              }
+
+              if (id(bms${bms_id}_max_cell_voltage).state > id(${yambms_id}_var_max_cell_voltage))
+              {
+                id(${yambms_id}_var_max_cell_voltage) = id(bms${bms_id}_max_cell_voltage).state;
+                id(${yambms_id}_var_max_voltage_cell) = id(bms${bms_id}_max_voltage_cell).state + (${bms_id} * 100);
+              }
+
+              if (id(bms${bms_id}_cell_ovp).state < id(${yambms_id}_var_min_cell_ovp))
+                id(${yambms_id}_var_min_cell_ovp) = id(bms${bms_id}_cell_ovp).state;
+
+              if (id(bms${bms_id}_cell_uvp).state > id(${yambms_id}_var_max_cell_uvp))
+                id(${yambms_id}_var_max_cell_uvp) = id(bms${bms_id}_cell_uvp).state;
+
+              if (id(bms${bms_id}_min_temperature).state < id(${yambms_id}_var_min_temperature))
+              {
+                id(${yambms_id}_var_min_temperature) = id(bms${bms_id}_min_temperature).state;
+                id(${yambms_id}_var_min_temperature_sensor) = id(bms${bms_id}_min_temperature_sensor).state;
+              }
+
+              if (id(bms${bms_id}_max_temperature).state > id(${yambms_id}_var_max_temperature))
+              {
+                id(${yambms_id}_var_max_temperature) = id(bms${bms_id}_max_temperature).state;
+                id(${yambms_id}_var_max_temperature_sensor) = id(bms${bms_id}_max_temperature_sensor).state;
+              }
+            }
+            else if (id(bms${bms_id}_combined) == true)
+            {
+              id(${yambms_id}_var_to_combine_bms_counter) -= 1;
+              id(bms${bms_id}_combined) = false;
+            }
+
+            id(${yambms_id}_var_to_combine_bms_number)++;
+          }
