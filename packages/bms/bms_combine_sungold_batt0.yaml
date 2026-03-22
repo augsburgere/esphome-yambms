@@ -35,24 +35,25 @@ esphome:
   devices:
     - id: bms_${bms_id}
       name: "${bms_name}"
-  on_boot:       
-    then:
-      - lambda: id(${yambms_id}_var_bms_counter) += 1;
-      - binary_sensor.template.publish:
-          id: bms${bms_id}_charging_allowed
-          state: true
-      - binary_sensor.template.publish:
-          id: bms${bms_id}_discharging_allowed
-          state: true
-      - binary_sensor.template.publish:
-          id: bms${bms_id}_online_status
-          state: true
-      - sensor.template.publish:
-          id: bms${bms_id}_errors_bitmask
-          state: 0.0
-      - sensor.template.publish:
-          id: bms${bms_id}_yambms_errors_bitmask
-          state: 0.0
+
+on_boot:
+  then:
+    - lambda: id(${yambms_id}_var_bms_counter) += 1;
+    - binary_sensor.template.publish:
+        id: bms${bms_id}_charging_allowed
+        state: true
+    - binary_sensor.template.publish:
+        id: bms${bms_id}_discharging_allowed
+        state: true
+    - binary_sensor.template.publish:
+        id: bms${bms_id}_online_status
+        state: true
+    - sensor.template.publish:
+        id: bms${bms_id}_errors_bitmask
+        state: 0.0
+    - sensor.template.publish:
+        id: bms${bms_id}_yambms_errors_bitmask
+        state: 0.0
  
 # +--------------------------------------+
 # | Globals                              |
